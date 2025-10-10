@@ -51,7 +51,7 @@ npm run preview
 
 ## Supabase Edge Function
 
-Edge function source: `src/supabase/functions/server/index.tsx`
+Edge function source: `supabase/functions/make-server-5111eaf7/index.ts`
 
 Deploy:
 ```bash
