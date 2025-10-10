@@ -14,7 +14,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from server import build_capabilities, process_ingredients  # noqa: E402
+import importlib.util
+
+try:
+    from server import build_capabilities, process_ingredients  # noqa: E402
+except ModuleNotFoundError:
+    legacy_path = PROJECT_ROOT / 'server.py'
+    spec = importlib.util.spec_from_file_location('legacy_server', legacy_path)
+    if spec is None or spec.loader is None:
+        raise
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    build_capabilities = getattr(module, 'build_capabilities')
+    process_ingredients = getattr(module, 'process_ingredients')
 
 ALLOWED_ORIGINS = [
     "https://clean-food-app.vercel.app",
