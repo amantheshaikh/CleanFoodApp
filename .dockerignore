@@ -1,0 +1,7 @@
+venv
+.git
+.gitignore
+**/__pycache__
+node_modules
+npm-debug.log
+.DS_Store
