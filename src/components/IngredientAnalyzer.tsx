@@ -675,7 +675,11 @@ const loadQuagga = async () => {
       params.set('preferences', JSON.stringify(preferencePayload));
     }
 
-    const response = await fetch('/check', {
+    const apiBaseRaw = import.meta.env.VITE_API_BASE as string | undefined;
+    const normalizedBase = apiBaseRaw ? apiBaseRaw.trim().replace(/\/?$/, '') : '';
+    const endpoint = normalizedBase ? `${normalizedBase}/check` : '/check';
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',

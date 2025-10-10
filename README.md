@@ -33,6 +33,8 @@ Create `.env` (or `.env.local`) with:
 ```
 VITE_SUPABASE_URL=<your-supabase-url>
 VITE_SUPABASE_ANON_KEY=<your-supabase-anon-key>
+# Optional: production API base (Supabase Edge function URL)
+VITE_API_BASE=https://<project-ref>.supabase.co/functions/v1/make-server-5111eaf7
 ```
 
 ## Install & Develop
