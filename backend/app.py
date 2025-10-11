@@ -30,8 +30,11 @@ except ModuleNotFoundError:
 
 ALLOWED_ORIGINS = [
     "https://clean-food-app.vercel.app",
+    "https://clean-food-app-git-main-amantheshaikh.vercel.app",
     "http://localhost:5173",
 ]
+
+VERCEL_REGEX = r"https://([^.]+-)*clean-food-app.*\.vercel\.app"
 
 
 class CheckPayload(BaseModel):
@@ -62,6 +65,7 @@ app = FastAPI(title="Clean Food Checker API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=VERCEL_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
