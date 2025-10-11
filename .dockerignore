@@ -1,7 +1,9 @@
-venv
 .git
 .gitignore
+.DS_Store
 **/__pycache__
 node_modules
 npm-debug.log
-.DS_Store
+venv
+.venv
+build/
