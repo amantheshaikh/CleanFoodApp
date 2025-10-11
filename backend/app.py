@@ -6,7 +6,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 
@@ -61,13 +61,13 @@ def _parse_preferences(raw_preferences: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-async def _resolve_payload(request: Request, payload: Optional[CheckPayload]) -> CheckPayload:
-    if payload is not None:
-        return payload
-
+async def _resolve_payload(request: Request) -> CheckPayload:
     content_type = (request.headers.get('Content-Type') or '').lower()
     if 'application/json' in content_type:
-        data = await request.json()
+        try:
+            data = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f'Invalid JSON body: {exc}')
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail='JSON body must be an object')
         try:
@@ -85,25 +85,40 @@ async def _resolve_payload(request: Request, payload: Optional[CheckPayload]) ->
             raise HTTPException(status_code=400, detail=exc.errors())
 
     body_bytes = await request.body()
-    if not body_bytes:
-        raise HTTPException(status_code=400, detail='Request body is empty')
-    try:
-        body_text = body_bytes.decode('utf-8')
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail='Request body is not valid UTF-8 text')
-
-    parsed = urllib.parse.parse_qs(body_text)
-    if parsed:
-        ingredients = parsed.get('ingredients', [''])[-1]
-        pref_values = parsed.get('preferences')
-        pref_raw = pref_values[-1] if pref_values else None
-        preferences = _parse_preferences(pref_raw)
+    body_text = ''
+    if body_bytes:
         try:
-            return CheckPayload(ingredients=ingredients, preferences=preferences)
-        except ValidationError as exc:
-            raise HTTPException(status_code=400, detail=exc.errors())
+            body_text = body_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail='Request body is not valid UTF-8 text')
+        parsed = urllib.parse.parse_qs(body_text, keep_blank_values=True)
+        if parsed:
+            ingredients = parsed.get('ingredients', [''])[-1]
+            pref_values = parsed.get('preferences')
+            pref_raw = pref_values[-1] if pref_values else None
+            preferences = _parse_preferences(pref_raw)
+            try:
+                return CheckPayload(ingredients=ingredients, preferences=preferences)
+            except ValidationError as exc:
+                raise HTTPException(status_code=400, detail=exc.errors())
+        stripped = body_text.strip()
+        if stripped:
+            try:
+                return CheckPayload(ingredients=stripped, preferences=None)
+            except ValidationError as exc:
+                raise HTTPException(status_code=400, detail=exc.errors())
 
-    raise HTTPException(status_code=400, detail='Unsupported request body format')
+    query_params = request.query_params
+    if query_params:
+        ingredients = query_params.get('ingredients', '')
+        preferences = _parse_preferences(query_params.get('preferences'))
+        if ingredients:
+            try:
+                return CheckPayload(ingredients=ingredients, preferences=preferences)
+            except ValidationError as exc:
+                raise HTTPException(status_code=400, detail=exc.errors())
+
+    raise HTTPException(status_code=400, detail='Missing or invalid ingredients payload')
 
 
 class CheckResponse(BaseModel):
@@ -144,8 +159,8 @@ async def capabilities() -> Dict[str, Any]:
 
 
 @app.post("/check", response_model=CheckResponse)
-async def check(request: Request, payload: Optional[CheckPayload] = Body(default=None)) -> CheckResponse:
-    payload = await _resolve_payload(request, payload)
+async def check(request: Request) -> CheckResponse:
+    payload = await _resolve_payload(request)
     ingredients = payload.ingredients.strip()
     if not ingredients:
         raise HTTPException(status_code=400, detail="ingredients cannot be empty")
