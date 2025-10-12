@@ -13,8 +13,8 @@ const supabase = createClient(
 );
 
 const OFF_WRITE_BASE_URL = Deno.env.get('OFF_WRITE_BASE_URL') || 'https://world.openfoodfacts.org';
-const OFF_WRITE_USER = Deno.env.get('OFF_USER') || '';
-const OFF_WRITE_PASSWORD = Deno.env.get('OFF_PASSWORD') || '';
+const OFF_WRITE_USER = Deno.env.get('OFF_USER') || 'cleanfoodapp';
+const OFF_WRITE_PASSWORD = Deno.env.get('OFF_PASSWORD') || 'cleanfoodapp@oct2025';
 const OFF_WRITE_COMMENT = Deno.env.get('OFF_COMMENT') || 'Submitted via CleanFoodApp';
 
 const STRICTNESS_OPTIONS = new Set(['lenient', 'moderate', 'strict']);
