@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -13,6 +13,7 @@ import { AddProductForm } from './AddProductForm';
 import { findAvoidGuideMatch, type AvoidGuideMatch } from '../data/avoidList';
 import { cn } from './ui/utils';
 
+import { ImageCropDialog } from './imagecropdialogbox';
 interface TaxonomyEntry {
   id?: string;
   display?: string;
@@ -97,6 +98,10 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const [isLoadingProduct, setIsLoadingProduct] = useState(false);
   const [barcodeDebug, setBarcodeDebug] = useState<string | null>(null);
+  const [croppingImage, setCroppingImage] = useState<string | null>(null);
+  const [isCropDialogOpen, setIsCropDialogOpen] = useState(false);
+  const [pendingOcrSource, setPendingOcrSource] = useState<'upload' | 'camera' | null>(null);
+
   const [dietPreference, setDietPreference] = useState<'none' | 'vegetarian' | 'vegan' | 'jain'>('none');
   const [trackedAllergies, setTrackedAllergies] = useState<string[]>([]);
   
@@ -156,6 +161,59 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
     }
   };
 
+  const fileToDataUrl = useCallback((file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
+  const openCropper = useCallback((imageSrc: string, source: 'upload' | 'camera') => {
+    setCroppingImage(imageSrc);
+    setPendingOcrSource(source);
+    setIsCropDialogOpen(true);
+  }, []);
+
+  // Stop OCR camera so dependency arrays can safely reference it
+  const stopOcrCamera = useCallback(() => {
+    if (ocrCameraStream) {
+      ocrCameraStream.getTracks().forEach((track) => track.stop());
+      setOcrCameraStream(null);
+    }
+    setIsOcrCameraActive(false);
+    setOcrCameraError(null);
+  }, [ocrCameraStream]);
+
+  const handleCropCancel = useCallback(() => {
+    const source = pendingOcrSource;
+    setIsCropDialogOpen(false);
+    setCroppingImage(null);
+    setPendingOcrSource(null);
+    if (source === 'camera') {
+      setShowOcrCameraPrompt(true);
+    }
+  }, [pendingOcrSource, setShowOcrCameraPrompt]);
+
+  const handleCropComplete = useCallback(async (blob: Blob) => {
+    const source = pendingOcrSource;
+    try {
+      const file = new File([blob], 'cropped-image.jpg', { type: blob.type || 'image/jpeg' });
+      const extractedText = await extractTextFromImage(file);
+      setIngredients(extractedText);
+      setIsCropDialogOpen(false);
+      setCroppingImage(null);
+      setPendingOcrSource(null);
+      if (source === 'camera') {
+        stopOcrCamera();
+      }
+    } catch (error: any) {
+      console.error('Crop processing failed:', error);
+      alert(error?.message || 'Failed to process the cropped image. Please try again.');
+    }
+  }, [extractTextFromImage, pendingOcrSource, stopOcrCamera]);
+
   // Handle image file upload
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -174,16 +232,13 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
     }
 
     try {
-      const extractedText = await extractTextFromImage(file);
-      setIngredients(extractedText);
-      
-      // Show success message
-      console.log('Text extracted successfully:', extractedText);
+      const dataUrl = await fileToDataUrl(file);
+      openCropper(dataUrl, 'upload');
     } catch (error: any) {
-      console.error('Image processing error:', error);
-      alert(`Failed to extract text from image: ${error.message}\n\nTips:\n- Ensure the image is clear and well-lit\n- Make sure the ingredient list is visible\n- Try a different image or use manual input`);
+      console.error('Image preview error:', error);
+      alert(error.message || 'Unable to prepare the image for cropping.');
     }
-    
+
     // Clear the input so the same file can be selected again
     event.target.value = '';
   };
@@ -255,50 +310,62 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
   };
 
   // Stop OCR camera
-  const stopOcrCamera = () => {
-    if (ocrCameraStream) {
-      ocrCameraStream.getTracks().forEach(track => track.stop());
-      setOcrCameraStream(null);
-    }
-    setIsOcrCameraActive(false);
-    setOcrCameraError(null);
-  };
-
   // Capture image for OCR processing
-  const captureForOcr = async () => {
-    if (!ocrVideoRef.current || !ocrCanvasRef.current) return;
+  const captureForOcr = useCallback(async () => {
+    const videoEl = ocrVideoRef.current;
+    const canvasEl = ocrCanvasRef.current;
 
-    const canvas = ocrCanvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!videoEl || !canvasEl) {
+      return;
+    }
 
-    canvas.width = ocrVideoRef.current.videoWidth;
-    canvas.height = ocrVideoRef.current.videoHeight;
-    ctx.drawImage(ocrVideoRef.current, 0, 0);
+    const context = canvasEl.getContext('2d');
+    if (!context) {
+      console.error('Camera capture error: Unable to access drawing context');
+      setOcrCameraError('Could not capture from camera. Please try again.');
+      return;
+    }
+
+    // Determine the frame dimensions from the video element or the active track
+    let frameWidth = videoEl.videoWidth;
+    let frameHeight = videoEl.videoHeight;
+
+    if (!frameWidth || !frameHeight) {
+      const trackSettings = ocrCameraStream?.getVideoTracks()?.[0]?.getSettings();
+      frameWidth = trackSettings?.width ?? frameWidth;
+      frameHeight = trackSettings?.height ?? frameHeight;
+    }
+
+    if (!frameWidth || !frameHeight) {
+      const rect = videoEl.getBoundingClientRect();
+      frameWidth = Math.round(rect.width);
+      frameHeight = Math.round(rect.height);
+    }
+
+    if (!frameWidth || !frameHeight) {
+      console.warn('Camera capture warning: Frame dimensions not ready');
+      setOcrCameraError('Camera feed is still loading. Hold steady for a moment and try capturing again.');
+      return;
+    }
+
+    canvasEl.width = frameWidth;
+    canvasEl.height = frameHeight;
+    context.drawImage(videoEl, 0, 0, frameWidth, frameHeight);
 
     try {
-      // Convert canvas to blob for OCR processing
-      canvas.toBlob(async (blob) => {
-        if (!blob) return;
-        
-        // Create a File object from the blob for OCR processing
-        const file = new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' });
-        
-        try {
-          const extractedText = await extractTextFromImage(file);
-          setIngredients(extractedText);
-          stopOcrCamera();
-          
-          console.log('Text extracted from camera capture:', extractedText);
-        } catch (error: any) {
-          console.error('OCR processing error:', error);
-          alert(`Failed to extract text from captured image: ${error.message}\n\nTips:\n- Ensure the ingredient list is clearly visible\n- Hold the camera steady\n- Make sure there's good lighting\n- Try capturing again or use image upload`);
-        }
-      }, 'image/jpeg', 0.9);
-    } catch (error) {
+      const dataUrl = canvasEl.toDataURL('image/jpeg', 0.95);
+
+      if (!dataUrl || dataUrl === 'data:' || dataUrl.length < 100) {
+        throw new Error('Camera produced an empty frame');
+      }
+
+      openCropper(dataUrl, 'camera');
+      stopOcrCamera();
+    } catch (error: any) {
       console.error('Camera capture error:', error);
+      setOcrCameraError(error?.message || 'Failed to capture image. Please try again.');
     }
-  };
+  }, [ocrCameraStream, openCropper, stopOcrCamera]);
 
   // Check camera permission (passive check only)
   const checkCameraPermission = async () => {
@@ -814,16 +881,25 @@ const loadQuagga = async () => {
               setProductFound(null);
             }
           }} className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="barcode" className="flex items-center gap-2">
+            <TabsList className="flex w-full flex-col gap-2 h-auto sm:h-9 sm:flex-row sm:gap-0">
+              <TabsTrigger
+                value="barcode"
+                className="flex w-full items-center justify-center gap-2 text-sm sm:text-base"
+              >
                 <Scan className="h-4 w-4" />
                 Scan Barcode
               </TabsTrigger>
-              <TabsTrigger value="ocr" className="flex items-center gap-2">
+              <TabsTrigger
+                value="ocr"
+                className="flex w-full items-center justify-center gap-2 text-sm sm:text-base"
+              >
                 <Camera className="h-4 w-4" />
                 Scan Ingredients
               </TabsTrigger>
-              <TabsTrigger value="text" className="flex items-center gap-2">
+              <TabsTrigger
+                value="text"
+                className="flex w-full items-center justify-center gap-2 text-sm sm:text-base"
+              >
                 <Type className="h-4 w-4" />
                 Type Ingredients
               </TabsTrigger>
@@ -1033,17 +1109,6 @@ const loadQuagga = async () => {
                         muted
                       />
                       <canvas ref={ocrCanvasRef} className="hidden" />
-                      
-                      {/* Camera overlay guide */}
-                      <div className="absolute inset-0 pointer-events-none">
-                        <div className="h-full flex items-center justify-center">
-                          <div className="border-2 border-white border-dashed rounded-lg w-56 h-40 flex items-center justify-center">
-                            <span className="text-white text-sm bg-black bg-opacity-50 px-2 py-1 rounded text-center">
-                              Position ingredient list here
-                            </span>
-                          </div>
-                        </div>
-                      </div>
                     </div>
                     
                     <div className="flex gap-3 justify-center">
@@ -1053,7 +1118,7 @@ const loadQuagga = async () => {
                         className="flex items-center gap-2"
                       >
                         <Camera className="h-4 w-4" />
-                        Capture & Process
+                        Capture & Crop
                       </Button>
                       <Button
                         variant="outline"
@@ -1065,7 +1130,7 @@ const loadQuagga = async () => {
                     </div>
                     
                     <p className="text-sm text-muted-foreground">
-                      Position the ingredient list within the frame and click "Capture & Process"
+                      Capture the label, crop to the ingredient list, and we'll run OCR on the selected area.
                     </p>
                   </div>
                 )}
@@ -1342,7 +1407,16 @@ const loadQuagga = async () => {
         );
       })()}
 
-      {/* OCR Camera Permission Dialog */}
+      {croppingImage && (
+        <ImageCropDialog
+          isOpen={isCropDialogOpen}
+          imageSrc={croppingImage}
+          onCropComplete={handleCropComplete}
+          onCancel={handleCropCancel}
+        />
+      )}
+
+      {/* OCR Camera permission dialog */}
       <Dialog open={showOcrCameraPrompt} onOpenChange={setShowOcrCameraPrompt}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

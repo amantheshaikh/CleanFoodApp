@@ -5,13 +5,12 @@ import { AuthModal } from './components/AuthModal';
 import { AnalysisHistory } from './components/AnalysisHistory';
 import { UserPreferences } from './components/UserPreferences';
 import { FeedbackForm } from './components/FeedbackForm';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { Card, CardContent } from './components/ui/card';
 import { Button } from './components/ui/button';
 import { ImageWithFallback } from './components/figma/ImageWithFallback';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog';
-import { Leaf, BookOpen, Search, User, LogOut, History, Settings, MessageSquare } from 'lucide-react';
+import { Leaf, BookOpen, Search, User, LogOut, History, Settings, MessageSquare, Menu } from 'lucide-react';
 import { supabase } from './utils/supabase/client';
 import type { AvoidSectionId } from './data/avoidList';
 
@@ -31,6 +30,8 @@ export default function App() {
   const [guideFocus, setGuideFocus] = useState<GuideFocusTarget | null>(null);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
 
   const focusMainContent = () => {
@@ -92,7 +93,7 @@ export default function App() {
       {/* Header */}
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 bg-green-100 rounded-full flex items-center justify-center">
                 <Leaf className="h-6 w-6 text-green-600" />
@@ -102,32 +103,61 @@ export default function App() {
                 <p className="text-muted-foreground">Know what you eat</p>
               </div>
             </div>
-            
-            <div className="flex items-center gap-3">
-              {user ? (
-                <>
-                  <span className="text-sm text-muted-foreground">
-                    Welcome, {user.user_metadata?.name || user.email}
-                  </span>
-                  <DropdownMenu open={isAccountMenuOpen} onOpenChange={setIsAccountMenuOpen}>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="icon" className="rounded-full">
-                        <User className="h-4 w-4" />
-                        <span className="sr-only">Account menu</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          setActiveTab('preferences');
-                          setIsAccountMenuOpen(false);
-                          setTimeout(() => focusMainContent(), 150);
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <Settings className="h-4 w-4" />
-                        Preferences
-                      </DropdownMenuItem>
+
+            <div className="flex flex-1 items-center justify-end gap-3 sm:gap-4">
+              {!user && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => setShowAuthModal(true)}
+                  className="flex items-center gap-2"
+                >
+                  <User className="h-4 w-4" />
+                  Sign In
+                </Button>
+              )}
+
+              {user && (
+                <span className="hidden text-sm text-muted-foreground sm:inline">
+                  Welcome, {user.user_metadata?.name || user.email}
+                </span>
+              )}
+
+              <DropdownMenu open={isAccountMenuOpen} onOpenChange={setIsAccountMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" className="rounded-full">
+                    <Menu className="h-4 w-4" />
+                    <span className="sr-only">Open menu</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setIsAccountMenuOpen(false);
+                      setGuideFocus(null);
+                      setActiveTab('analyzer');
+                      setTimeout(() => focusMainContent(), 150);
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <Search className="h-4 w-4" />
+                    Analyze Food
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setIsAccountMenuOpen(false);
+                      setGuideFocus(null);
+                      setActiveTab('guide');
+                      setTimeout(() => focusMainContent(), 150);
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <BookOpen className="h-4 w-4" />
+                    Clean Eating Guide
+                  </DropdownMenuItem>
+
+                  {user ? (
+                    <>
                       <DropdownMenuItem
                         onSelect={() => {
                           setActiveTab('history');
@@ -141,9 +171,20 @@ export default function App() {
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onSelect={() => {
+                          setActiveTab('preferences');
                           setIsAccountMenuOpen(false);
-                          setTimeout(() => setShowFeedbackModal(true), 100);
+                          setTimeout(() => focusMainContent(), 150);
                         }}
+                        className="flex items-center gap-2"
+                      >
+                        <Settings className="h-4 w-4" />
+                        Preferences
+                      </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setIsAccountMenuOpen(false);
+                      setTimeout(() => setShowFeedbackModal(true), 100);
+                    }}
                         className="flex items-center gap-2"
                       >
                         <MessageSquare className="h-4 w-4" />
@@ -160,30 +201,21 @@ export default function App() {
                         <LogOut className="h-4 w-4" />
                         Sign Out
                       </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowFeedbackModal(true)}
-                    className="flex items-center gap-2"
-                  >
-                    <MessageSquare className="h-4 w-4" />
-                    Feedback
-                  </Button>
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => setShowAuthModal(true)}
-                  >
-                    <User className="h-4 w-4 mr-2" />
-                    Sign In
-                  </Button>
-                </>
-              )}
+                    </>
+                  ) : (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setIsAccountMenuOpen(false);
+                        setTimeout(() => setShowFeedbackModal(true), 100);
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      Provide Feedback
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
@@ -203,7 +235,7 @@ export default function App() {
                   and dietary restrictions — offering instant, science-based insights 
                   tailored to your body and lifestyle.
                 </p>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center">
                   <div className="flex items-center gap-2">
                     <Search className="h-4 w-4" />
                     <span>Instant Analysis</span>
@@ -236,54 +268,46 @@ export default function App() {
         className="container mx-auto px-4 pb-12 scroll-mt-24 focus:outline-none"
         tabIndex={-1}
       >
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full mb-8 grid-cols-2 h-12">
-            <TabsTrigger
-              value="analyzer"
-              className="flex items-center gap-3 px-4 py-2 text-base"
-            >
-              <Search className="h-4 w-4" />
-              Analyze Food
-            </TabsTrigger>
-            <TabsTrigger
-              value="guide"
-              className="flex items-center gap-3 px-4 py-2 text-base"
-            >
-              <BookOpen className="h-4 w-4" />
-              Clean Eating Guide
-            </TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="analyzer">
-            <IngredientAnalyzer accessToken={accessToken} onNavigateToGuide={handleNavigateToGuide} />
-          </TabsContent>
-          
-              <TabsContent value="guide">
-                <CleanEatingGuide focusedIngredient={guideFocus} onClearFocus={() => setGuideFocus(null)} />
-              </TabsContent>
-            
-          {user && activeTab === 'history' && (
-            <TabsContent value="history">
-              <AnalysisHistory accessToken={accessToken} />
-            </TabsContent>
-          )}
-
-          {user && activeTab === 'preferences' && (
-            <TabsContent value="preferences">
-              <UserPreferences accessToken={accessToken} />
-            </TabsContent>
-          )}
-        </Tabs>
+        {activeTab === 'analyzer' && (
+          <IngredientAnalyzer accessToken={accessToken} onNavigateToGuide={handleNavigateToGuide} />
+        )}
+        {activeTab === 'guide' && (
+          <CleanEatingGuide focusedIngredient={guideFocus} onClearFocus={() => setGuideFocus(null)} />
+        )}
+        {user && activeTab === 'history' && (
+          <AnalysisHistory accessToken={accessToken} />
+        )}
+        {user && activeTab === 'preferences' && (
+          <UserPreferences accessToken={accessToken} />
+        )}
       </main>
 
       {/* Footer */}
       <footer className="border-t bg-muted/30 mt-12">
         <div className="container mx-auto px-4 py-6">
-          <div className="text-center text-muted-foreground">
-            <p>CleanEats - Your guide to cleaner eating choices</p>
-            <p className="text-sm mt-1">
-              Analysis based on common clean eating standards. Always consult nutritional professionals for dietary advice.
-            </p>
+          <div className="flex flex-col items-center gap-3 text-center text-muted-foreground sm:flex-row sm:justify-between sm:text-left">
+            <div>
+              <p>CleanEats - Your guide to cleaner eating choices</p>
+              <p className="text-sm mt-1">
+                Analysis based on common clean eating standards. Always consult nutritional professionals for dietary advice.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-3 sm:justify-end">
+              <Button
+                variant="link"
+                className="px-0 text-sm"
+                onClick={() => setShowTermsModal(true)}
+              >
+                Terms of Use
+              </Button>
+              <Button
+                variant="link"
+                className="px-0 text-sm"
+                onClick={() => setShowPrivacyModal(true)}
+              >
+                Privacy Policy
+              </Button>
+            </div>
           </div>
         </div>
       </footer>
@@ -304,6 +328,57 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           <FeedbackForm accessToken={accessToken} variant="plain" />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showTermsModal} onOpenChange={setShowTermsModal}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Terms of Use</DialogTitle>
+            <DialogDescription>
+              Please review these guidelines before using CleanEats.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 text-sm text-muted-foreground">
+            <p>
+              CleanEats helps you evaluate ingredients based on widely accepted clean-eating principles. By using the
+              app, you agree to use the information for personal guidance only and to make your own purchasing and
+              dietary decisions.
+            </p>
+            <p>
+              We do not provide medical advice or warranty the accuracy of third-party data sources. Always consult
+              qualified professionals if you have specific health concerns.
+            </p>
+            <p>
+              Continued use of CleanEats signifies your acceptance of these terms. If you do not agree, please discontinue
+              use of the app.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showPrivacyModal} onOpenChange={setShowPrivacyModal}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Privacy Policy</DialogTitle>
+            <DialogDescription>
+              Learn how we collect, use, and protect your data.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 text-sm text-muted-foreground">
+            <p>
+              CleanEats stores only the information needed to deliver ingredient analysis, save your preferences, and
+              improve the experience. Ingredient scans and feedback you submit may be reviewed to enhance accuracy.
+            </p>
+            <p>
+              We do not sell your personal data. Access is restricted to trusted service providers that help us operate
+              the application, and only for the purposes described here.
+            </p>
+            <p>
+              You may request deletion of your account and associated data at any time by contacting support through the
+              feedback form.
+            </p>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
