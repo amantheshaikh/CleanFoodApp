@@ -772,8 +772,12 @@ const loadQuagga = async () => {
     const apiAnalysis = data.analysis || {};
 
     const hits = Array.from(new Set([...(apiAnalysis.hits ?? []), ...(data.hits ?? [])]));
-    const taxonomyEntries: TaxonomyEntry[] = (apiAnalysis.taxonomy ?? []).filter(Boolean);
-    const dietHits = Array.isArray(apiAnalysis.diet_hits) ? apiAnalysis.diet_hits : Array.isArray(data.diet_hits) ? data.diet_hits : [];
+    const taxonomyEntries: TaxonomyEntry[] = (apiAnalysis.taxonomy ?? data.taxonomy ?? []).filter(Boolean);
+    const dietHits = Array.isArray(apiAnalysis.diet_hits)
+      ? apiAnalysis.diet_hits
+      : Array.isArray(data.diet_hits)
+        ? data.diet_hits
+        : [];
     const dietPref = apiAnalysis.diet_preference ?? data.diet_preference ?? null;
     const allergyHits = Array.isArray(apiAnalysis.allergy_hits)
       ? apiAnalysis.allergy_hits
@@ -789,10 +793,10 @@ const loadQuagga = async () => {
     return {
       isClean: Boolean(data.is_clean ?? apiAnalysis.is_clean ?? false),
       hits,
-      parsedIngredients: apiAnalysis.ingredients ?? [],
-      canonical: apiAnalysis.canonical ?? [],
+      parsedIngredients: apiAnalysis.ingredients ?? data.ingredients ?? [],
+      canonical: apiAnalysis.canonical ?? data.canonical ?? [],
       taxonomy: taxonomyEntries,
-      source: apiAnalysis.source ?? 'unknown',
+      source: apiAnalysis.source ?? data.source ?? 'unknown',
       html: data.html,
       taxonomyError: apiAnalysis.taxonomy_error ?? data.taxonomy_error ?? null,
       additivesError: apiAnalysis.additives_error ?? data.additives_error ?? null,
