@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Leaf, BookOpen, Search, User, LogOut, History, Settings, MessageSquare, Menu } from 'lucide-react';
 import { supabase } from './utils/supabase/client';
 import type { AvoidSectionId } from './data/avoidList';
+import { Toaster } from './components/ui/sonner';
 
 type GuideFocusTarget = {
   section: AvoidSectionId;
@@ -381,6 +382,8 @@ export default function App() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <Toaster richColors position="top-right" closeButton />
     </div>
   );
 }

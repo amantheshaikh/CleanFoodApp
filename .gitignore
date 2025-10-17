@@ -20,3 +20,8 @@ pnpm-debug.log*
 
 # Supabase temp
 supabase/.temp
+.venv/
+venv/
+backend/.venv/
+Library/
+Users/

@@ -1,10 +1,26 @@
 
   import { defineConfig } from 'vite';
   import react from '@vitejs/plugin-react-swc';
+  import { visualizer } from 'rollup-plugin-visualizer';
   import path from 'path';
 
+  const shouldAnalyze = process.env.ANALYZE === 'true';
+
   export default defineConfig({
-    plugins: [react()],
+    plugins: [
+      react(),
+      ...(shouldAnalyze
+        ? [
+            visualizer({
+              filename: 'build/stats.html',
+              template: 'treemap',
+              gzipSize: true,
+              brotliSize: true,
+              emitFile: true,
+            }),
+          ]
+        : []),
+    ],
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {

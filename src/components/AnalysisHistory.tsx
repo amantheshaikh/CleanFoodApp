@@ -5,7 +5,8 @@ import { Alert, AlertDescription } from './ui/alert';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { projectId } from '../utils/supabase/info';
+import { getAuthHeaders } from '../utils/supabase/auth';
 
 interface AnalysisHistoryProps {
   accessToken: string | null;
@@ -44,9 +45,9 @@ export function AnalysisHistory({ accessToken }: AnalysisHistoryProps) {
     try {
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-5111eaf7/analysis/history`, {
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(accessToken),
+        },
       });
 
       const result = await response.json();

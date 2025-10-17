@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useReducer, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -6,7 +6,8 @@ import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
 import { Alert, AlertDescription } from './ui/alert';
 import { Loader2, Mail, MessageSquare } from 'lucide-react';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { projectId } from '../utils/supabase/info';
+import { getAuthHeaders } from '../utils/supabase/auth';
 import { cn } from './ui/utils';
 
 interface FeedbackFormProps {
@@ -29,11 +30,42 @@ const initialState: FeedbackState = {
   message: '',
 };
 
+interface SubmissionState {
+  isSubmitting: boolean;
+  error: string | null;
+  success: string | null;
+}
+
+type SubmissionAction =
+  | { type: 'resetMessages' }
+  | { type: 'submitStart' }
+  | { type: 'submitSuccess'; message: string }
+  | { type: 'submitError'; message: string };
+
+const submissionInitial: SubmissionState = {
+  isSubmitting: false,
+  error: null,
+  success: null,
+};
+
+function submissionReducer(state: SubmissionState, action: SubmissionAction): SubmissionState {
+  switch (action.type) {
+    case 'resetMessages':
+      return { ...state, error: null, success: null };
+    case 'submitStart':
+      return { isSubmitting: true, error: null, success: null };
+    case 'submitSuccess':
+      return { isSubmitting: false, error: null, success: action.message };
+    case 'submitError':
+      return { isSubmitting: false, error: action.message, success: null };
+    default:
+      return state;
+  }
+}
+
 export function FeedbackForm({ accessToken, variant = 'card', className }: FeedbackFormProps) {
   const [form, setForm] = useState<FeedbackState>(initialState);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [{ isSubmitting, error, success }, dispatchSubmission] = useReducer(submissionReducer, submissionInitial);
 
   const updateField = (key: keyof FeedbackState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm((prev) => ({ ...prev, [key]: event.target.value }));
@@ -41,12 +73,11 @@ export function FeedbackForm({ accessToken, variant = 'card', className }: Feedb
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setError(null);
-    setSuccess(null);
+    dispatchSubmission({ type: 'resetMessages' });
 
     const trimmedMessage = form.message.trim();
     if (!trimmedMessage) {
-      setError('Please share a brief note so we know how to improve.');
+      dispatchSubmission({ type: 'submitError', message: 'Please share a brief note so we know how to improve.' });
       return;
     }
 
@@ -58,15 +89,13 @@ export function FeedbackForm({ accessToken, variant = 'card', className }: Feedb
       rating: Number.isFinite(ratingNumber) && ratingNumber >= 1 && ratingNumber <= 5 ? ratingNumber : undefined,
     };
 
-    setIsSubmitting(true);
+    dispatchSubmission({ type: 'submitStart' });
     try {
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-5111eaf7/feedback`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(accessToken
-            ? { Authorization: `Bearer ${accessToken}` }
-            : { Authorization: `Bearer ${publicAnonKey}` }),
+          ...getAuthHeaders(accessToken),
         },
         body: JSON.stringify(payload),
       });
@@ -77,13 +106,11 @@ export function FeedbackForm({ accessToken, variant = 'card', className }: Feedb
         throw new Error(result?.error || 'We could not send your feedback. Please try again.');
       }
 
-      setSuccess(result?.message || 'Thank you for the feedback!');
+      dispatchSubmission({ type: 'submitSuccess', message: result?.message || 'Thank you for the feedback!' });
       setForm(initialState);
     } catch (err: any) {
       console.error('Feedback submission error:', err);
-      setError(err.message || 'We could not send your feedback. Please try again.');
-    } finally {
-      setIsSubmitting(false);
+      dispatchSubmission({ type: 'submitError', message: err.message || 'We could not send your feedback. Please try again.' });
     }
   };
 

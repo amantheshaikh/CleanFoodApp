@@ -1,49 +1,30 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { Button } from './ui/button';
-import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Alert, AlertDescription } from './ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
-import { CheckCircle, XCircle, AlertTriangle, Camera, Upload, Scan, Type, Loader2, Info, Plus, Leaf } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Camera, Scan, Type, Leaf, Loader2 } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
-import { AddProductForm } from './AddProductForm';
+import { projectId } from '../utils/supabase/info';
+import { getAuthHeaders } from '../utils/supabase/auth';
 import { findAvoidGuideMatch, type AvoidGuideMatch } from '../data/avoidList';
 import { cn } from './ui/utils';
+import type { AnalysisResult, FlaggedIngredientBadge, TaxonomyEntry } from '../types/analysis';
+import { ManualEntryTab } from './ingredient-analyzer/ManualEntryTab';
+import { toast } from 'sonner@2.0.3';
 
-import { ImageCropDialog } from './imagecropdialogbox';
-interface TaxonomyEntry {
-  id?: string;
-  display?: string;
-  parents?: string[];
-  synonyms?: string[];
-  source?: string;
-}
+const BarcodeScannerSection = lazy(() =>
+  import('./ingredient-analyzer/BarcodeScannerSection').then((module) => ({
+    default: module.BarcodeScannerSection,
+  }))
+);
 
-interface AnalysisResult {
-  isClean: boolean;
-  hits: string[];
-  parsedIngredients: string[];
-  canonical: string[];
-  taxonomy: TaxonomyEntry[];
-  source: string;
-  html?: string;
-  taxonomyError?: string | null;
-  additivesError?: string | null;
-  dietHits?: string[];
-  dietPreference?: string | null;
-  allergyHits?: string[];
-  allergyPreferences?: string[];
-}
-
-interface FlaggedIngredientBadge {
-  key: string;
-  label: string;
-  match: AvoidGuideMatch | null;
-  original: string;
-}
+const OcrCaptureSection = lazy(() =>
+  import('./ingredient-analyzer/OcrCaptureSection').then((module) => ({
+    default: module.OcrCaptureSection,
+  }))
+);
 
 interface IngredientAnalyzerProps {
   accessToken?: string | null;
@@ -82,596 +63,10 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeTab, setActiveTab] = useState('barcode');
-  const [isProcessingImage, setIsProcessingImage] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [cameraPermission, setCameraPermission] = useState<'unknown' | 'granted' | 'denied'>('unknown');
-  const [ocrCameraStream, setOcrCameraStream] = useState<MediaStream | null>(null);
-  const [isOcrCameraActive, setIsOcrCameraActive] = useState(false);
-  const [ocrCameraError, setOcrCameraError] = useState<string | null>(null);
-  const [showOcrCameraPrompt, setShowOcrCameraPrompt] = useState(false);
-  const [showCameraPrompt, setShowCameraPrompt] = useState(false);
-  const [scannedBarcode, setScannedBarcode] = useState<string | null>(null);
-  const [showAddProductForm, setShowAddProductForm] = useState(false);
-  const [productFound, setProductFound] = useState<any>(null);
-  const [barcodeError, setBarcodeError] = useState<string | null>(null);
-  const [isLoadingProduct, setIsLoadingProduct] = useState(false);
-  const [barcodeDebug, setBarcodeDebug] = useState<string | null>(null);
-  const [croppingImage, setCroppingImage] = useState<string | null>(null);
-  const [isCropDialogOpen, setIsCropDialogOpen] = useState(false);
-  const [pendingOcrSource, setPendingOcrSource] = useState<'upload' | 'camera' | null>(null);
+  const [isAddProductFormVisible, setAddProductFormVisible] = useState(false);
 
   const [dietPreference, setDietPreference] = useState<'none' | 'vegetarian' | 'vegan' | 'jain'>('none');
   const [trackedAllergies, setTrackedAllergies] = useState<string[]>([]);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const ocrVideoRef = useRef<HTMLVideoElement>(null);
-  const ocrCanvasRef = useRef<HTMLCanvasElement>(null);
-  const quaggaContainerRef = useRef<HTMLDivElement>(null);
-  const quaggaRef = useRef<any>(null);
-  const quaggaOnDetectedRef = useRef<any>(null);
-  const quaggaOnProcessedRef = useRef<any>(null);
-  const barcodeDetectionAttemptsRef = useRef(0);
-  const barcodeDetectedRef = useRef(false);
-
-  // Cleanup camera streams on unmount
-  useEffect(() => {
-    return () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach((track) => track.stop());
-      }
-      if (ocrCameraStream) {
-        ocrCameraStream.getTracks().forEach((track) => track.stop());
-      }
-    };
-  }, [cameraStream, ocrCameraStream]);
-
-  // OCR functionality using Tesseract.js
-  const extractTextFromImage = async (imageFile: File): Promise<string> => {
-    setIsProcessingImage(true);
-    try {
-      // Import Tesseract.js dynamically
-      const Tesseract = await import('tesseract.js');
-      
-      const { data: { text } } = await Tesseract.recognize(imageFile, 'eng', {
-        logger: (m: any) => {
-          if (m.status === 'recognizing text') {
-            console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
-          }
-        }
-      });
-      
-      // Clean up the extracted text - remove extra whitespace and format
-      const cleanedText = text
-        .replace(/\s+/g, ' ')
-        .replace(/[^\w\s,.-]/g, '')
-        .trim();
-      
-      if (!cleanedText) {
-        throw new Error('No text found in image. Please try a clearer image.');
-      }
-      
-      return cleanedText;
-    } catch (error: any) {
-      console.error('OCR Error:', error);
-      throw new Error(error.message || 'Failed to extract text from image');
-    } finally {
-      setIsProcessingImage(false);
-    }
-  };
-
-  const fileToDataUrl = useCallback((file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
-    });
-  }, []);
-
-  const openCropper = useCallback((imageSrc: string, source: 'upload' | 'camera') => {
-    setCroppingImage(imageSrc);
-    setPendingOcrSource(source);
-    setIsCropDialogOpen(true);
-  }, []);
-
-  // Stop OCR camera so dependency arrays can safely reference it
-  const stopOcrCamera = useCallback(() => {
-    if (ocrCameraStream) {
-      ocrCameraStream.getTracks().forEach((track) => track.stop());
-      setOcrCameraStream(null);
-    }
-    setIsOcrCameraActive(false);
-    setOcrCameraError(null);
-  }, [ocrCameraStream]);
-
-  const handleCropCancel = useCallback(() => {
-    const source = pendingOcrSource;
-    setIsCropDialogOpen(false);
-    setCroppingImage(null);
-    setPendingOcrSource(null);
-    if (source === 'camera') {
-      setShowOcrCameraPrompt(true);
-    }
-  }, [pendingOcrSource, setShowOcrCameraPrompt]);
-
-  const handleCropComplete = useCallback(async (blob: Blob) => {
-    const source = pendingOcrSource;
-    try {
-      const file = new File([blob], 'cropped-image.jpg', { type: blob.type || 'image/jpeg' });
-      const extractedText = await extractTextFromImage(file);
-      setIngredients(extractedText);
-      setIsCropDialogOpen(false);
-      setCroppingImage(null);
-      setPendingOcrSource(null);
-      if (source === 'camera') {
-        stopOcrCamera();
-      }
-    } catch (error: any) {
-      console.error('Crop processing failed:', error);
-      alert(error?.message || 'Failed to process the cropped image. Please try again.');
-    }
-  }, [extractTextFromImage, pendingOcrSource, stopOcrCamera]);
-
-  // Handle image file upload
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file.');
-      return;
-    }
-
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      alert('Image file is too large. Please select an image smaller than 10MB.');
-      return;
-    }
-
-    try {
-      const dataUrl = await fileToDataUrl(file);
-      openCropper(dataUrl, 'upload');
-    } catch (error: any) {
-      console.error('Image preview error:', error);
-      alert(error.message || 'Unable to prepare the image for cropping.');
-    }
-
-    // Clear the input so the same file can be selected again
-    event.target.value = '';
-  };
-
-  // Show OCR camera permission prompt
-  const showOcrCameraPermissionPrompt = () => {
-    setShowOcrCameraPrompt(true);
-  };
-
-  // Start camera for OCR
-  const startOcrCamera = async () => {
-    setOcrCameraError(null);
-    setIsOcrCameraActive(true);
-    setShowOcrCameraPrompt(false);
-    
-    try {
-      // Check if camera is supported
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera not supported on this device or browser. Please try uploading an image instead.');
-      }
-
-      // Check if we're on HTTPS (required for camera access)
-      if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-        throw new Error('Camera access requires a secure connection (HTTPS). Please try uploading an image instead.');
-      }
-
-      const constraints = {
-        video: {
-          facingMode: 'environment', // Use back camera if available
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      };
-
-      console.log('Requesting camera access for OCR...');
-      
-      // Directly request camera access - this will trigger permission prompt if needed
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      setOcrCameraStream(stream);
-      setCameraPermission('granted');
-      
-      if (ocrVideoRef.current) {
-        ocrVideoRef.current.srcObject = stream;
-        await ocrVideoRef.current.play();
-      }
-      
-      console.log('OCR Camera access granted successfully');
-    } catch (error: any) {
-      console.error('OCR Camera access error:', error);
-      setIsOcrCameraActive(false);
-      
-      let errorMessage = '';
-      
-      if (error.name === 'NotAllowedError') {
-        setCameraPermission('denied');
-        errorMessage = 'Camera access was denied. To use the camera feature:\n\n1. Click "Allow" when your browser asks for camera permission\n2. If you accidentally clicked "Block", click the camera icon in your address bar and select "Allow"\n3. You can also try refreshing the page and trying again\n\nAlternatively, you can upload an image instead.';
-      } else if (error.name === 'NotFoundError') {
-        errorMessage = 'No camera found on this device. Please try uploading an image instead.';
-      } else if (error.name === 'NotSupportedError') {
-        errorMessage = 'Camera not supported on this device or browser. Please try uploading an image instead.';
-      } else if (error.name === 'NotReadableError') {
-        errorMessage = 'Camera is already in use by another application. Please close other apps using the camera and try again.';
-      } else {
-        errorMessage = error.message || 'An unknown error occurred. Please try uploading an image instead.';
-      }
-      
-      setOcrCameraError(errorMessage);
-    }
-  };
-
-  // Stop OCR camera
-  // Capture image for OCR processing
-  const captureForOcr = useCallback(async () => {
-    const videoEl = ocrVideoRef.current;
-    const canvasEl = ocrCanvasRef.current;
-
-    if (!videoEl || !canvasEl) {
-      return;
-    }
-
-    const context = canvasEl.getContext('2d');
-    if (!context) {
-      console.error('Camera capture error: Unable to access drawing context');
-      setOcrCameraError('Could not capture from camera. Please try again.');
-      return;
-    }
-
-    // Determine the frame dimensions from the video element or the active track
-    let frameWidth = videoEl.videoWidth;
-    let frameHeight = videoEl.videoHeight;
-
-    if (!frameWidth || !frameHeight) {
-      const trackSettings = ocrCameraStream?.getVideoTracks()?.[0]?.getSettings();
-      frameWidth = trackSettings?.width ?? frameWidth;
-      frameHeight = trackSettings?.height ?? frameHeight;
-    }
-
-    if (!frameWidth || !frameHeight) {
-      const rect = videoEl.getBoundingClientRect();
-      frameWidth = Math.round(rect.width);
-      frameHeight = Math.round(rect.height);
-    }
-
-    if (!frameWidth || !frameHeight) {
-      console.warn('Camera capture warning: Frame dimensions not ready');
-      setOcrCameraError('Camera feed is still loading. Hold steady for a moment and try capturing again.');
-      return;
-    }
-
-    canvasEl.width = frameWidth;
-    canvasEl.height = frameHeight;
-    context.drawImage(videoEl, 0, 0, frameWidth, frameHeight);
-
-    try {
-      const dataUrl = canvasEl.toDataURL('image/jpeg', 0.95);
-
-      if (!dataUrl || dataUrl === 'data:' || dataUrl.length < 100) {
-        throw new Error('Camera produced an empty frame');
-      }
-
-      openCropper(dataUrl, 'camera');
-      stopOcrCamera();
-    } catch (error: any) {
-      console.error('Camera capture error:', error);
-      setOcrCameraError(error?.message || 'Failed to capture image. Please try again.');
-    }
-  }, [ocrCameraStream, openCropper, stopOcrCamera]);
-
-  // Check camera permission (passive check only)
-  const checkCameraPermission = async () => {
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        return false;
-      }
-
-      // Check if permissions API is available
-      if ('permissions' in navigator) {
-        const permission = await navigator.permissions.query({ name: 'camera' as PermissionName });
-        setCameraPermission(permission.state);
-        return permission.state === 'granted';
-      }
-      
-      return true; // Assume it's available if permissions API not supported
-    } catch (error) {
-      console.error('Permission check error:', error);
-      return true; // Try anyway if permission check fails
-    }
-  };
-
-  // Show camera permission prompt for barcode scanning
-  const showCameraPermissionPrompt = () => {
-    setShowCameraPrompt(true);
-  };
-
-  // Start camera for barcode scanning
-  const startCamera = async () => {
-    setCameraError(null);
-    setBarcodeError(null);
-    setIsScanning(true);
-    setShowCameraPrompt(false);
-
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera not supported on this device or browser.');
-      }
-      if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-        throw new Error('Camera access requires a secure connection (HTTPS).');
-      }
-
-      const Quagga = await loadQuagga();
-      setBarcodeDebug('Initializing barcode scanner...');
-
-      barcodeDetectionAttemptsRef.current = 0;
-      barcodeDetectedRef.current = false;
-
-      const constraints = {
-        facingMode: 'environment',
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      };
-
-      Quagga.init(
-        {
-          inputStream: {
-            type: 'LiveStream',
-            target: quaggaContainerRef.current || undefined,
-            constraints,
-          },
-          decoder: {
-            readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader', 'upc_e_reader'],
-          },
-          locate: true,
-        },
-        (err: any) => {
-          if (err) {
-            console.error('Quagga initialization error:', err);
-            setIsScanning(false);
-            setBarcodeError('Failed to start barcode scanner. ' + (err?.message || ''));
-            setBarcodeDebug('Initialization error. See console.');
-            return;
-          }
-
-          setBarcodeDebug('Scanning for barcode...');
-
-          const onDetected = (data: any) => {
-            const code = data?.codeResult?.code?.trim();
-            if (!code || barcodeDetectedRef.current) {
-              return;
-            }
-            console.log('Barcode detected via Quagga:', code);
-            barcodeDetectedRef.current = true;
-            setBarcodeDebug(`Detected barcode: ${code}`);
-            stopCamera();
-            fetchProductInfo(code);
-          };
-
-          const onProcessed = () => {
-            if (barcodeDetectedRef.current) {
-              return;
-            }
-            barcodeDetectionAttemptsRef.current += 1;
-            if (barcodeDetectionAttemptsRef.current % 25 === 0) {
-              setBarcodeDebug(
-                `Scanning... ${barcodeDetectionAttemptsRef.current} frames with no match. Adjust distance, lighting, or angle.`
-              );
-            }
-          };
-
-          quaggaOnDetectedRef.current = onDetected;
-          quaggaOnProcessedRef.current = onProcessed;
-
-          Quagga.onDetected(onDetected);
-          Quagga.onProcessed(onProcessed);
-          Quagga.start();
-
-          requestAnimationFrame(() => {
-            const container = quaggaContainerRef.current;
-            if (!container) return;
-            const videoEl = container.querySelector('video') as HTMLVideoElement | null;
-            const canvasEl = container.querySelector('canvas') as HTMLCanvasElement | null;
-            if (videoEl) {
-              videoEl.setAttribute('playsinline', 'true');
-              videoEl.style.width = '100%';
-              videoEl.style.height = '100%';
-              videoEl.style.objectFit = 'cover';
-              videoEl.style.position = 'absolute';
-              videoEl.style.inset = '0';
-            }
-            if (canvasEl) {
-              canvasEl.style.width = '100%';
-              canvasEl.style.height = '100%';
-              canvasEl.style.position = 'absolute';
-              canvasEl.style.inset = '0';
-            }
-          });
-        }
-      );
-    } catch (error: any) {
-      console.error('Camera access error:', error);
-      setIsScanning(false);
-
-      let errorMessage = '';
-      if (error.name === 'NotAllowedError') {
-        setCameraPermission('denied');
-        errorMessage =
-          'Camera access was denied. To use the camera feature, click "Allow" when prompted or adjust your browser settings to enable the camera.';
-      } else if (error.name === 'NotFoundError') {
-        errorMessage = 'No camera found on this device.';
-      } else if (error.name === 'NotSupportedError') {
-        errorMessage = 'Camera not supported on this device or browser.';
-      } else if (error.name === 'NotReadableError') {
-        errorMessage =
-          'Camera is already in use by another application. Please close other apps using the camera and try again.';
-      } else {
-        errorMessage = error.message || 'An unknown error occurred.';
-      }
-
-      setCameraError(errorMessage);
-      setBarcodeDebug(null);
-    }
-  };;
-
-  // Stop camera
-  const stopCamera = () => {
-    try {
-      const Quagga = quaggaRef.current;
-      if (Quagga && Quagga.stop) {
-        if (quaggaOnDetectedRef.current) {
-          Quagga.offDetected(quaggaOnDetectedRef.current);
-          quaggaOnDetectedRef.current = null;
-        }
-        if (quaggaOnProcessedRef.current) {
-          Quagga.offProcessed(quaggaOnProcessedRef.current);
-          quaggaOnProcessedRef.current = null;
-        }
-        Quagga.stop();
-      }
-    } catch (err) {
-      console.debug('Error stopping Quagga:', err);
-    }
-
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-      setCameraStream(null);
-    }
-    setIsScanning(false);
-    setCameraError(null);
-    setBarcodeDebug(null);
-    barcodeDetectionAttemptsRef.current = 0;
-    barcodeDetectedRef.current = false;
-  };
-
-const loadQuagga = async () => {
-  if (quaggaRef.current) {
-    return quaggaRef.current;
-  }
-  const module = await import('https://cdn.skypack.dev/@ericblade/quagga2@1.2.6?min');
-  quaggaRef.current = module.default || module;
-  return quaggaRef.current;
-};
-
-  // Capture frame and attempt barcode scanning
-  
-;;
-
-  const extractIngredientsFromProduct = (product: any): string | null => {
-    const candidates = [
-      product.ingredients_text_en,
-      product.ingredients_text,
-      product.ingredients_text_fr,
-      product.ingredients_text_es,
-    ];
-    for (const value of candidates) {
-      if (typeof value === 'string' && value.trim()) {
-        return value.trim();
-      }
-    }
-    if (Array.isArray(product.ingredients)) {
-      const parts = product.ingredients
-        .map((item: any) => {
-          if (typeof item === 'string') return item;
-          if (item && typeof item.text === 'string') return item.text;
-          return null;
-        })
-        .filter(Boolean);
-      if (parts.length) {
-        return parts.join(', ');
-      }
-    }
-    return null;
-  };
-
-  // Fetch product information from Open Food Facts directly
-  const fetchProductInfo = async (barcode: string) => {
-    try {
-      setIsLoadingProduct(true);
-      setBarcodeError(null);
-      setScannedBarcode(barcode);
-      
-      console.log(`Fetching product info for barcode: ${barcode}`);
-      
-      const fields = ['code', 'product_name', 'brands', 'quantity', 'ingredients_text', 'ingredients_text_en', 'ingredients', 'image_ingredients_url'];
-      const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}.json?fields=${fields.join(',')}`;
-      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
-      const data = await response.json();
-
-      if (data.status !== 1 || !data.product) {
-        console.warn('Product lookup failed', data);
-        setProductFound(null);
-        setShowAddProductForm(true);
-        setBarcodeError('Product not found in Open Food Facts. Help add it!');
-        setBarcodeDebug('Open Food Facts did not return a product for this barcode.');
-        return;
-      }
-
-      const product = data.product;
-      const productSummary = {
-        name: product.product_name || 'Unnamed product',
-        brand: product.brands || undefined,
-        quantity: product.quantity || undefined,
-        barcode: product.code || barcode,
-      };
-
-      setProductFound(productSummary);
-      setBarcodeDebug(`Fetched product from Open Food Facts (${productSummary.name})`);
-
-      const ingredientText = extractIngredientsFromProduct(product);
-
-      if (ingredientText) {
-        setIngredients(ingredientText);
-        try {
-          const analysisResult = await performAnalysis(ingredientText);
-          setAnalysis(analysisResult);
-          await saveAnalysis(ingredientText, analysisResult);
-          setBarcodeDebug(prev => (prev ? prev + ' • Analysis complete.' : 'Analysis complete.'));
-        } catch (analysisError) {
-          console.error('Failed to analyze ingredients from Open Food Facts', analysisError);
-          setBarcodeDebug('Retrieved ingredients but analysis failed. Check console for details.');
-        }
-      } else {
-        setBarcodeError('Product found but no ingredients listed. You can help add the missing details.');
-        setBarcodeDebug('Product had no ingredient text. Prompting manual contribution.');
-        setShowAddProductForm(true);
-      }
-    } catch (error) {
-      console.error('Error fetching product info:', error);
-      setBarcodeError('Failed to fetch product information. Please try again or enter ingredients manually.');
-    } finally {
-      setIsLoadingProduct(false);
-    }
-  };
-
-  // Handle successful product addition
-  const handleProductAdded = (productUrl: string) => {
-    setShowAddProductForm(false);
-    setScannedBarcode(null);
-    setBarcodeError(null);
-    
-    // Optionally refetch the product info to populate ingredients
-    if (scannedBarcode) {
-      setTimeout(() => {
-        fetchProductInfo(scannedBarcode);
-      }, 1000);
-    }
-  };
-
-  // Handle canceling product addition
-  const handleCancelAddProduct = () => {
-    setShowAddProductForm(false);
-    setScannedBarcode(null);
-    setBarcodeError(null);
-  };
-
   useEffect(() => {
     if (!accessToken) {
       setDietPreference('none');
@@ -719,28 +114,45 @@ const loadQuagga = async () => {
     };
   }, [accessToken]);
 
-  const performAnalysis = async (text: string): Promise<AnalysisResult> => {
-    const params = new URLSearchParams();
-    params.set('ingredients', text);
+  const analysisPreferences = useMemo(() => {
     const preferencePayload: Record<string, unknown> = {};
+
     if (dietPreference && dietPreference !== 'none') {
       preferencePayload.diet = dietPreference;
     }
-    if (trackedAllergies.length > 0) {
-      const cleanedAllergies = Array.from(
-        new Set(
-          trackedAllergies
-            .map((entry) => entry?.toString().trim())
-            .filter((entry): entry is string => Boolean(entry))
-        )
-      );
-      if (cleanedAllergies.length > 0) {
-        preferencePayload.allergies = cleanedAllergies;
-      }
+
+    const cleanedAllergies = Array.from(
+      new Set(
+        trackedAllergies
+          .map((entry) => entry?.toString().trim())
+          .filter((entry): entry is string => Boolean(entry))
+      )
+    );
+
+    if (cleanedAllergies.length > 0) {
+      preferencePayload.allergies = cleanedAllergies;
     }
-    if (Object.keys(preferencePayload).length > 0) {
-      params.set('preferences', JSON.stringify(preferencePayload));
+
+    const preferenceString = Object.keys(preferencePayload).length > 0
+      ? JSON.stringify(preferencePayload)
+      : null;
+
+    return {
+      preferenceString,
+    };
+  }, [dietPreference, trackedAllergies]);
+
+  const buildAnalysisParams = useCallback((text: string) => {
+    const params = new URLSearchParams();
+    params.set('ingredients', text);
+    if (analysisPreferences.preferenceString) {
+      params.set('preferences', analysisPreferences.preferenceString);
     }
+    return params;
+  }, [analysisPreferences]);
+
+  const performAnalysis = useCallback(async (text: string): Promise<AnalysisResult> => {
+    const params = buildAnalysisParams(text);
 
     const apiBaseRaw = import.meta.env.VITE_API_BASE as string | undefined;
     const normalizedBase = apiBaseRaw ? apiBaseRaw.trim().replace(/\/?$/, '') : '';
@@ -805,15 +217,15 @@ const loadQuagga = async () => {
       allergyHits,
       allergyPreferences: allergyPrefs,
     };
-  };
+  }, [buildAnalysisParams]);
 
-  const saveAnalysis = async (text: string, analysisResult: AnalysisResult) => {
+  const saveAnalysis = useCallback(async (text: string, analysisResult: AnalysisResult) => {
     try {
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-5111eaf7/analysis`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken || publicAnonKey}`,
+          ...getAuthHeaders(accessToken),
         },
         body: JSON.stringify({
           ingredients: text,
@@ -827,25 +239,34 @@ const loadQuagga = async () => {
     } catch (error) {
       console.error('Error saving analysis:', error);
     }
-  };
+  }, [accessToken]);
 
-  const analyzeIngredients = async () => {
-    if (!ingredients.trim()) {
-      alert('Please enter some ingredients to analyze.');
-      return;
-    }
-
+  const analyzeAndSave = useCallback(async (text: string) => {
+    setAnalysis(null);
     setIsAnalyzing(true);
 
     try {
-      const analysisResult = await performAnalysis(ingredients);
+      const analysisResult = await performAnalysis(text);
       setAnalysis(analysisResult);
-      await saveAnalysis(ingredients, analysisResult);
-    } catch (error: any) {
-      console.error('Analysis error:', error);
-      alert(error.message || 'Failed to analyze ingredients. Please try again.');
+      await saveAnalysis(text, analysisResult);
+      return analysisResult;
     } finally {
       setIsAnalyzing(false);
+    }
+  }, [performAnalysis, saveAnalysis]);
+
+  const analyzeIngredients = async () => {
+    const text = ingredients.trim();
+    if (!text) {
+      toast.error('Please enter some ingredients to analyze.');
+      return;
+    }
+
+    try {
+      await analyzeAndSave(text);
+    } catch (error: any) {
+      console.error('Analysis error:', error);
+      toast.error(error?.message || 'Failed to analyze ingredients. Please try again.');
     }
   };
 
@@ -875,16 +296,16 @@ const loadQuagga = async () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs value={activeTab} onValueChange={(value) => {
-            setActiveTab(value);
-            // Reset barcode-specific state when switching tabs
-            if (value !== 'barcode') {
-              setShowAddProductForm(false);
-              setScannedBarcode(null);
-              setBarcodeError(null);
-              setProductFound(null);
-            }
-          }} className="w-full">
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => {
+              setActiveTab(value);
+              if (value !== 'barcode') {
+                setAddProductFormVisible(false);
+              }
+            }}
+            className="w-full"
+          >
             <TabsList className="flex w-full flex-col gap-2 h-auto sm:h-9 sm:flex-row sm:gap-0">
               <TabsTrigger
                 value="barcode"
@@ -909,295 +330,53 @@ const loadQuagga = async () => {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="barcode" className="space-y-4 mt-6">
-              {showAddProductForm && scannedBarcode ? (
-                <AddProductForm
-                  barcode={scannedBarcode}
-                  onSuccess={handleProductAdded}
-                  onCancel={handleCancelAddProduct}
-                />
-              ) : (
-                <div className="text-center space-y-4">
-                  <div>
-                    <p className="text-muted-foreground mb-2">
-                      Scan a product barcode to automatically fetch ingredient information
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      Uses the OpenFoodFacts database - help improve it by adding missing products!
-                    </p>
-                  </div>
-                  
-                  {barcodeError && (
-                    <Alert variant={showAddProductForm ? "default" : "destructive"}>
-                      <AlertTriangle className="h-4 w-4" />
-                      <AlertDescription>
-                        {barcodeError}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {barcodeDebug && (
-                    <div className="text-xs text-muted-foreground bg-muted/40 rounded px-3 py-2">
-                      {barcodeDebug}
+            <TabsContent value="barcode" className="mt-6">
+              {activeTab === 'barcode' ? (
+                <Suspense
+                  fallback={
+                    <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      Loading barcode scanner...
                     </div>
-                  )}
-
-                  {cameraError && (
-                    <Alert variant="destructive">
-                      <AlertTriangle className="h-4 w-4" />
-                      <AlertDescription asChild>
-                        <div className="space-y-3">
-                          <div className="whitespace-pre-line">
-                            {cameraError}
-                          </div>
-                          {cameraPermission === 'denied' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={showCameraPermissionPrompt}
-                              className="w-full"
-                            >
-                              Try Camera Again
-                            </Button>
-                          )}
-                        </div>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {productFound && (
-                    <Alert>
-                      <CheckCircle className="h-4 w-4" />
-                      <AlertDescription asChild>
-                        <div className="text-left">
-                          <div><strong>Product Found:</strong> {productFound.name}</div>
-                          {productFound.brand && <div><strong>Brand:</strong> {productFound.brand}</div>}
-                          {productFound.quantity && <div><strong>Quantity:</strong> {productFound.quantity}</div>}
-                          <div className="text-xs text-muted-foreground mt-1">
-                            Barcode: {productFound.barcode}
-                          </div>
-                        </div>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  
-                  {!isScanning ? (
-                    <div className="space-y-3 text-center">
-                      <Button
-                        onClick={showCameraPermissionPrompt}
-                        disabled={isLoadingProduct}
-                        className="mx-auto flex items-center gap-2"
-                      >
-                        <Camera className="h-4 w-4" />
-                        Start Camera
-                      </Button>
-                      {!navigator.mediaDevices && (
-                        <p className="text-sm text-muted-foreground">
-                          Camera not supported on this device or browser
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="relative max-w-md mx-auto h-64 bg-black/80 rounded-lg border overflow-hidden shadow-inner">
-                        <div ref={quaggaContainerRef} className="absolute inset-0" />
-                        <div className="absolute inset-0 pointer-events-none">
-                          <div className="h-full flex items-center justify-center">
-                            <div className="border-2 border-white border-dashed rounded-lg w-48 h-32 flex items-center justify-center">
-                              <span className="text-white text-sm bg-black bg-opacity-50 px-2 py-1 rounded text-center">
-                                Position barcode here
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="flex gap-3 justify-center">
-                        <Button
-                          variant="outline"
-                          onClick={stopCamera}
-                          disabled={isLoadingProduct}
-                        >
-                          Stop Camera
-                        </Button>
-                      </div>
-                      
-                      <p className="text-sm text-muted-foreground">
-                        Point your camera at a product barcode and click "Scan Barcode"
-                      </p>
-                    </div>
-                  )}
-                  
-                  {ingredients && activeTab === 'barcode' && !showAddProductForm && (
-                    <div className="mt-4 text-left">
-                      <label className="block mb-2">Product Ingredients:</label>
-                      <Textarea
-                        value={ingredients}
-                        onChange={(e) => setIngredients(e.target.value)}
-                        rows={4}
-                        className="w-full"
-                        placeholder="Ingredients will appear here after scanning..."
-                      />
-                      <p className="text-sm text-muted-foreground mt-1">
-                        You can edit the ingredients if needed before analysis
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
+                  }
+                >
+                  <BarcodeScannerSection
+                    ingredients={ingredients}
+                    onIngredientsChange={setIngredients}
+                    onAnalysisRequest={analyzeAndSave}
+                    onAddProductFormChange={setAddProductFormVisible}
+                  />
+                </Suspense>
+              ) : null}
             </TabsContent>
 
-            <TabsContent value="ocr" className="space-y-4 mt-6">
-              <div className="text-center space-y-4">
-                <div>
-                  <p className="text-muted-foreground mb-2">
-                    Capture or upload a photo of the ingredient list or nutrition label
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    For best results, ensure the image is clear, well-lit, and the text is readable
-                  </p>
-                </div>
-                
-                {ocrCameraError && (
-                  <Alert variant="destructive">
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertDescription asChild>
-                      <div className="space-y-3">
-                        <div className="whitespace-pre-line">
-                          {ocrCameraError}
-                        </div>
-                        {cameraPermission === 'denied' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={showOcrCameraPermissionPrompt}
-                            className="w-full"
-                          >
-                            Try Camera Again
-                          </Button>
-                        )}
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                )}
-                
-                {!isOcrCameraActive ? (
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                    <Button
-                      variant="outline"
-                      onClick={showOcrCameraPermissionPrompt}
-                      disabled={isProcessingImage}
-                      className="flex items-center gap-2"
-                    >
-                      <Camera className="h-4 w-4" />
-                      Take Photo
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isProcessingImage}
-                      className="flex items-center gap-2"
-                    >
-                      <Upload className="h-4 w-4" />
-                      Upload Image
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="relative max-w-md mx-auto">
-                      <video
-                        ref={ocrVideoRef}
-                        className="w-full rounded-lg border"
-                        autoPlay
-                        playsInline
-                        muted
-                      />
-                      <canvas ref={ocrCanvasRef} className="hidden" />
+            <TabsContent value="ocr" className="mt-6">
+              {activeTab === 'ocr' ? (
+                <Suspense
+                  fallback={
+                    <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      Loading OCR tools...
                     </div>
-                    
-                    <div className="flex gap-3 justify-center">
-                      <Button
-                        onClick={captureForOcr}
-                        disabled={isProcessingImage}
-                        className="flex items-center gap-2"
-                      >
-                        <Camera className="h-4 w-4" />
-                        Capture & Crop
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={stopOcrCamera}
-                        disabled={isProcessingImage}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                    
-                    <p className="text-sm text-muted-foreground">
-                      Capture the label, crop to the ingredient list, and we'll run OCR on the selected area.
-                    </p>
-                  </div>
-                )}
-                
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleImageUpload}
-                  accept="image/*"
-                  className="hidden"
-                />
-                
-                {isProcessingImage && (
-                  <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <p>Processing image with OCR...</p>
-                    <p className="text-sm">This may take a few seconds</p>
-                  </div>
-                )}
-                
-                <div className="text-xs text-muted-foreground space-y-1">
-                  <p>• Supported formats: JPG, PNG, GIF, WebP</p>
-                  <p>• Maximum file size: 10MB</p>
-                  <p>• Works best with high-contrast text</p>
-                  <p>• Hold camera steady for best results</p>
-                </div>
-                
-                {ingredients && activeTab === 'ocr' && (
-                  <div className="mt-4 text-left">
-                    <label className="block mb-2">Extracted Text (edit if needed):</label>
-                    <Textarea
-                      value={ingredients}
-                      onChange={(e) => setIngredients(e.target.value)}
-                      rows={4}
-                      className="w-full"
-                      placeholder="Extracted ingredients will appear here..."
-                    />
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Please review and edit the extracted text to ensure accuracy before analysis
-                    </p>
-                  </div>
-                )}
-              </div>
+                  }
+                >
+                  <OcrCaptureSection
+                    ingredients={ingredients}
+                    onIngredientsChange={setIngredients}
+                  />
+                </Suspense>
+              ) : null}
             </TabsContent>
-            
-            <TabsContent value="text" className="space-y-4 mt-6">
-              <div>
-                <label htmlFor="ingredients" className="block mb-2">
-                  Ingredients (separate with commas)
-                </label>
-                <Textarea
-                  id="ingredients"
-                  placeholder="e.g., organic tomatoes, water, sea salt, basil, oregano, garlic powder"
-                  value={ingredients}
-                  onChange={(e) => setIngredients(e.target.value)}
-                  rows={4}
-                  className="w-full"
-                />
-              </div>
+
+            <TabsContent value="text" className="mt-6">
+              <ManualEntryTab
+                ingredients={ingredients}
+                onIngredientsChange={setIngredients}
+              />
             </TabsContent>
           </Tabs>
           
-          {!showAddProductForm && (
+          {!isAddProductFormVisible && (
             <div className="mt-6">
               <Button 
                 onClick={analyzeIngredients}
@@ -1411,104 +590,6 @@ const loadQuagga = async () => {
         );
       })()}
 
-      {croppingImage && (
-        <ImageCropDialog
-          isOpen={isCropDialogOpen}
-          imageSrc={croppingImage}
-          onCropComplete={handleCropComplete}
-          onCancel={handleCropCancel}
-        />
-      )}
-
-      {/* OCR Camera permission dialog */}
-      <Dialog open={showOcrCameraPrompt} onOpenChange={setShowOcrCameraPrompt}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Camera className="h-5 w-5" />
-              Camera Access Required
-            </DialogTitle>
-            <DialogDescription asChild>
-              <div className="space-y-3 text-left">
-                <div className="flex items-start gap-2">
-                  <Info className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
-                  <span>This app needs access to your camera to capture ingredient labels for text extraction.</span>
-                </div>
-                
-                <div className="bg-muted p-3 rounded-lg text-sm">
-                  <div className="font-medium mb-2">What will happen next:</div>
-                  <ol className="list-decimal list-inside space-y-1">
-                    <li>Your browser will ask for camera permission</li>
-                    <li>Click "Allow" to enable the camera</li>
-                    <li>Position the ingredient list in the camera view</li>
-                    <li>Capture and process the image</li>
-                  </ol>
-                </div>
-                
-                <div className="text-xs text-muted-foreground">
-                  Your privacy is protected - images are processed locally and never stored on our servers.
-                </div>
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex gap-2 sm:justify-between">
-            <Button
-              variant="outline"
-              onClick={() => setShowOcrCameraPrompt(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={startOcrCamera}>
-              Enable Camera
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Barcode Camera Permission Dialog */}
-      <Dialog open={showCameraPrompt} onOpenChange={setShowCameraPrompt}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Camera className="h-5 w-5" />
-              Camera Access Required
-            </DialogTitle>
-            <DialogDescription asChild>
-              <div className="space-y-3 text-left">
-                <div className="flex items-start gap-2">
-                  <Info className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
-                  <span>This app needs access to your camera to scan product barcodes.</span>
-                </div>
-                
-                <div className="bg-muted p-3 rounded-lg text-sm">
-                  <div className="font-medium mb-2">What will happen next:</div>
-                  <ol className="list-decimal list-inside space-y-1">
-                    <li>Your browser will ask for camera permission</li>
-                    <li>Click "Allow" to enable the camera</li>
-                    <li>Point your camera at a product barcode</li>
-                    <li>Tap "Scan Barcode" to read the code</li>
-                  </ol>
-                </div>
-                
-                <div className="text-xs text-muted-foreground">
-                  Your privacy is protected - camera feed stays on your device.
-                </div>
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex gap-2 sm:justify-between">
-            <Button
-              variant="outline"
-              onClick={() => setShowCameraPrompt(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={startCamera}>
-              Enable Camera
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

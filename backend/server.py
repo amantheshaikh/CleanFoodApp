@@ -175,14 +175,16 @@ OFF_DEFAULT_COUNTRY = os.environ.get("OFF_COUNTRY", "world")
 OFF_DEFAULT_LANGUAGE = os.environ.get("OFF_LANGUAGE", "en").lower() or "en"
 
 BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
 TEMPLATE_PATH = BASE_DIR / "templates" / "index.html"
 _revamped_candidates = [
-    BASE_DIR / "Clean_Food_App_Revamped",
-    BASE_DIR / "Clean Food App Revamped",
+    PROJECT_ROOT,
+    PROJECT_ROOT / "build",
+    PROJECT_ROOT / "dist",
 ]
-REVAMPED_DIR = next((path for path in _revamped_candidates if path.exists()), _revamped_candidates[0])
-REVAMPED_BUILD_DIR = REVAMPED_DIR / "build"
-REVAMPED_DIST_DIR = REVAMPED_DIR / "dist"
+REVAMPED_DIR = next((path for path in _revamped_candidates if path.exists()), PROJECT_ROOT)
+REVAMPED_BUILD_DIR = PROJECT_ROOT / "build"
+REVAMPED_DIST_DIR = PROJECT_ROOT / "dist"
 REVAMPED_ROOT = REVAMPED_BUILD_DIR if REVAMPED_BUILD_DIR.exists() else REVAMPED_DIST_DIR
 REVAMPED_INDEX = REVAMPED_ROOT / "index.html"
 REVAMPED_AVAILABLE = REVAMPED_INDEX.exists()
@@ -202,6 +204,17 @@ for lang in _tax_langs_env or ["en"]:
     if lang not in _seen_langs:
         OFF_TAXONOMY_LANGS.append(lang)
         _seen_langs.add(lang)
+
+_cors_allowed_origins_raw = os.environ.get("CORS_ALLOW_ORIGINS", "*").strip()
+if not _cors_allowed_origins_raw:
+    _cors_allowed_origins_raw = "*"
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in _cors_allowed_origins_raw.split(",") if origin.strip()] or ["*"]
+CORS_ALLOW_HEADERS = os.environ.get(
+    "CORS_ALLOW_HEADERS",
+    "Content-Type, X-Requested-With, Accept, Authorization",
+).strip()
+CORS_ALLOW_METHODS = os.environ.get("CORS_ALLOW_METHODS", "GET, POST, OPTIONS").strip()
+CORS_ALLOWED_ORIGINS_LOOKUP = {origin.lower(): origin for origin in CORS_ALLOWED_ORIGINS if origin != "*"}
 
 ACTIVE_LANGS: Set[str] = {"en"}
 if OFF_DEFAULT_LANGUAGE:
@@ -1541,9 +1554,38 @@ def build_check_payload(raw_text: str, preferences: Optional[Dict[str, Any]] = N
     }
 
 
+def _choose_cors_origin(request_origin: Optional[str]) -> Optional[str]:
+    if "*" in CORS_ALLOWED_ORIGINS:
+        return "*"
+    if not CORS_ALLOWED_ORIGINS:
+        return "*"
+    if not request_origin:
+        return CORS_ALLOWED_ORIGINS[0]
+    return CORS_ALLOWED_ORIGINS_LOOKUP.get(request_origin.lower())
+
+
+def _set_cors_headers(handler: BaseHTTPRequestHandler, *, preflight: bool = False) -> None:
+    request_origin = handler.headers.get("Origin")
+    allow_origin = _choose_cors_origin(request_origin)
+    if allow_origin:
+        handler.send_header("Access-Control-Allow-Origin", allow_origin)
+        if allow_origin != "*":
+            handler.send_header("Vary", "Origin")
+    if preflight:
+        request_headers = handler.headers.get("Access-Control-Request-Headers")
+        if request_headers:
+            handler.send_header("Access-Control-Allow-Headers", request_headers)
+        elif CORS_ALLOW_HEADERS:
+            handler.send_header("Access-Control-Allow-Headers", CORS_ALLOW_HEADERS)
+        if CORS_ALLOW_METHODS:
+            handler.send_header("Access-Control-Allow-Methods", CORS_ALLOW_METHODS)
+        handler.send_header("Access-Control-Max-Age", "600")
+
+
 def _respond_json(handler: BaseHTTPRequestHandler, status: int, payload: Dict[str, Any]) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
+    _set_cors_headers(handler)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
@@ -1554,6 +1596,7 @@ def _respond_json(handler: BaseHTTPRequestHandler, status: int, payload: Dict[st
 def _respond_html(handler: BaseHTTPRequestHandler, status: int, html_body: str) -> None:
     body = html_body.encode("utf-8")
     handler.send_response(status)
+    _set_cors_headers(handler)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
@@ -1567,6 +1610,7 @@ def _serve_file(handler: BaseHTTPRequestHandler, path: Path, default_mime: str =
         mime = default_mime
     data = path.read_bytes()
     handler.send_response(200)
+    _set_cors_headers(handler)
     if mime.startswith("text/") or mime in {"application/javascript", "application/json"}:
         handler.send_header("Content-Type", f"{mime}; charset=utf-8")
     else:
@@ -1640,6 +1684,11 @@ def build_capabilities() -> Dict[str, Any]:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self) -> None:  # noqa: N802 - signature fixed by BaseHTTPRequestHandler
+        self.send_response(204)
+        _set_cors_headers(self, preflight=True)
+        self.end_headers()
+
     def do_GET(self) -> None:  # noqa: N802 - signature fixed by BaseHTTPRequestHandler
         if self.path.startswith("/capabilities"):
             _respond_json(self, 200, build_capabilities())

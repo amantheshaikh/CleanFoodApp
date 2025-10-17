@@ -5,7 +5,7 @@ A Vite + React application that helps users scan ingredient labels, analyse them
 ## Project Structure
 
 ```text
-Clean_Food_App_Revamped/
+CleanFoodApp/
 ├── backend/                 # Python utility script (legacy/local usage)
 ├── public/                  # Static assets (hero image, etc.)
 ├── src/

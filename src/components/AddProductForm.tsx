@@ -22,6 +22,7 @@ import {
   X
 } from 'lucide-react';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { toast } from 'sonner@2.0.3';
 
 interface AddProductFormProps {
   barcode: string;
@@ -95,13 +96,13 @@ export function AddProductForm({ barcode, onSuccess, onCancel }: AddProductFormP
 
     // Validate file type
     if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file.');
+      toast.error('Please select a valid image file.');
       return;
     }
 
     // Validate file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
-      alert('Image file is too large. Please select an image smaller than 10MB.');
+      toast.error('Image file is too large. Please select an image smaller than 10MB.');
       return;
     }
 
