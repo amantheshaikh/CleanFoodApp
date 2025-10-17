@@ -14,6 +14,7 @@ import { Leaf, BookOpen, Search, User, LogOut, History, Settings, MessageSquare,
 import { supabase } from './utils/supabase/client';
 import type { AvoidSectionId } from './data/avoidList';
 import { Toaster } from './components/ui/sonner';
+import { Logo } from './components/Logo';
 
 type GuideFocusTarget = {
   section: AvoidSectionId;
@@ -95,15 +96,7 @@ export default function App() {
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-4">
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 bg-green-100 rounded-full flex items-center justify-center">
-                <Leaf className="h-6 w-6 text-green-600" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-semibold text-foreground">CleanEats</h1>
-                <p className="text-muted-foreground">Know what you eat</p>
-              </div>
-            </div>
+            <Logo />
 
             <div className="flex flex-1 items-center justify-end gap-3 sm:gap-4">
               {!user && (

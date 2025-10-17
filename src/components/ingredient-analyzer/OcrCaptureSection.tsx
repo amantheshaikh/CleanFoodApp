@@ -61,14 +61,6 @@ export function OcrCaptureSection({ ingredients, onIngredientsChange }: OcrCaptu
         handleImageUpload={handleImageUpload}
       />
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleImageUpload}
-      />
-
       {croppingImage && (
         <ImageCropDialog
           isOpen={isCropDialogOpen}

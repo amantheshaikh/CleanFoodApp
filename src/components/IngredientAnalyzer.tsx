@@ -26,6 +26,8 @@ const OcrCaptureSection = lazy(() =>
   }))
 );
 
+type AnalyzerTab = 'barcode' | 'ocr' | 'text';
+
 interface IngredientAnalyzerProps {
   accessToken?: string | null;
   onNavigateToGuide?: (payload: {
@@ -59,14 +61,31 @@ const formatIngredientLabel = (value: string): string => {
 };
 
 export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: IngredientAnalyzerProps) {
-  const [ingredients, setIngredients] = useState('');
+  const [ingredientsByTab, setIngredientsByTab] = useState<Record<AnalyzerTab, string>>({
+    barcode: '',
+    ocr: '',
+    text: '',
+  });
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [activeTab, setActiveTab] = useState('barcode');
+  const [activeTab, setActiveTab] = useState<AnalyzerTab>('barcode');
   const [isAddProductFormVisible, setAddProductFormVisible] = useState(false);
 
   const [dietPreference, setDietPreference] = useState<'none' | 'vegetarian' | 'vegan' | 'jain'>('none');
   const [trackedAllergies, setTrackedAllergies] = useState<string[]>([]);
+
+  const ingredients = useMemo(() => ingredientsByTab[activeTab], [ingredientsByTab, activeTab]);
+
+  const setIngredientsForTab = useCallback(
+    (value: string, tab?: AnalyzerTab) => {
+      const targetTab = tab ?? activeTab;
+      setIngredientsByTab((prev) => {
+        if (prev[targetTab] === value) return prev;
+        return { ...prev, [targetTab]: value };
+      });
+    },
+    [activeTab]
+  );
   useEffect(() => {
     if (!accessToken) {
       setDietPreference('none');
@@ -299,8 +318,9 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
           <Tabs
             value={activeTab}
             onValueChange={(value) => {
-              setActiveTab(value);
-              if (value !== 'barcode') {
+              const nextTab = value as AnalyzerTab;
+              setActiveTab(nextTab);
+              if (nextTab !== 'barcode') {
                 setAddProductFormVisible(false);
               }
             }}
@@ -341,8 +361,8 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
                   }
                 >
                   <BarcodeScannerSection
-                    ingredients={ingredients}
-                    onIngredientsChange={setIngredients}
+                    ingredients={ingredientsByTab.barcode}
+                    onIngredientsChange={(value) => setIngredientsForTab(value, 'barcode')}
                     onAnalysisRequest={analyzeAndSave}
                     onAddProductFormChange={setAddProductFormVisible}
                   />
@@ -361,8 +381,8 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
                   }
                 >
                   <OcrCaptureSection
-                    ingredients={ingredients}
-                    onIngredientsChange={setIngredients}
+                    ingredients={ingredientsByTab.ocr}
+                    onIngredientsChange={(value) => setIngredientsForTab(value, 'ocr')}
                   />
                 </Suspense>
               ) : null}
@@ -370,8 +390,8 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
 
             <TabsContent value="text" className="mt-6">
               <ManualEntryTab
-                ingredients={ingredients}
-                onIngredientsChange={setIngredients}
+                ingredients={ingredientsByTab.text}
+                onIngredientsChange={(value) => setIngredientsForTab(value, 'text')}
               />
             </TabsContent>
           </Tabs>
