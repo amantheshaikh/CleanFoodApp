@@ -14,6 +14,11 @@ ALLOWED_ORIGINS = [
     "https://clean-food-app.vercel.app",
     "https://clean-food-app-git-main-amantheshaikh.vercel.app",
     "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://10.0.2.2:3000",
+    "http://10.0.2.2:3001",
+    "capacitor://localhost",
 ]
 
 VERCEL_REGEX = r"https://([^.]+-)*clean-food-app.*\.vercel\.app"

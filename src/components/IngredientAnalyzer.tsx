@@ -8,6 +8,7 @@ import { CheckCircle, XCircle, AlertTriangle, Camera, Scan, Type, Leaf, Loader2 
 import { supabase } from '../utils/supabase/client';
 import { projectId } from '../utils/supabase/info';
 import { getAuthHeaders } from '../utils/supabase/auth';
+import { resolveApiBase } from '../utils/apiBase';
 import { findAvoidGuideMatch, type AvoidGuideMatch } from '../data/avoidList';
 import { cn } from './ui/utils';
 import type { AnalysisResult, FlaggedIngredientBadge, TaxonomyEntry } from '../types/analysis';
@@ -173,9 +174,8 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
   const performAnalysis = useCallback(async (text: string): Promise<AnalysisResult> => {
     const params = buildAnalysisParams(text);
 
-    const apiBaseRaw = import.meta.env.VITE_API_BASE as string | undefined;
-    const normalizedBase = apiBaseRaw ? apiBaseRaw.trim().replace(/\/?$/, '') : '';
-    const endpoint = normalizedBase ? `${normalizedBase}/check` : '/check';
+    const apiBaseRaw = resolveApiBase();
+    const endpoint = apiBaseRaw ? `${apiBaseRaw}/check` : '/check';
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -280,6 +280,8 @@ export function IngredientAnalyzer({ accessToken, onNavigateToGuide }: Ingredien
       toast.error('Please enter some ingredients to analyze.');
       return;
     }
+
+    setIngredientsForTab(text);
 
     try {
       await analyzeAndSave(text);

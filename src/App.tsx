@@ -93,124 +93,167 @@ export default function App() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-            <Logo />
+      <header className="sticky top-0 z-40 border-b bg-card/90 backdrop-blur supports-[backdrop-filter]:bg-card/75">
+        <div className="container mx-auto flex h-16 items-center justify-between gap-4 px-4">
+          <Logo />
 
-            <div className="flex flex-1 items-center justify-end gap-3 sm:gap-4">
-              {!user && (
+          <nav className="hidden items-center gap-2 md:flex">
+            <Button
+              variant={activeTab === 'analyzer' ? 'secondary' : 'ghost'}
+              onClick={() => {
+                setGuideFocus(null);
+                setActiveTab('analyzer');
+                focusMainContent();
+              }}
+            >
+              <Search className="h-4 w-4" />
+              Analyze
+            </Button>
+            <Button
+              variant={activeTab === 'guide' ? 'secondary' : 'ghost'}
+              onClick={() => {
+                setGuideFocus(null);
+                setActiveTab('guide');
+                focusMainContent();
+              }}
+            >
+              <BookOpen className="h-4 w-4" />
+              Guide
+            </Button>
+            {user && (
+              <>
                 <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => setShowAuthModal(true)}
+                  variant={activeTab === 'history' ? 'secondary' : 'ghost'}
+                  onClick={() => {
+                    setActiveTab('history');
+                    focusMainContent();
+                  }}
+                >
+                  <History className="h-4 w-4" />
+                  History
+                </Button>
+                <Button
+                  variant={activeTab === 'preferences' ? 'secondary' : 'ghost'}
+                  onClick={() => {
+                    setActiveTab('preferences');
+                    focusMainContent();
+                  }}
+                >
+                  <Settings className="h-4 w-4" />
+                  Preferences
+                </Button>
+              </>
+            )}
+            <Button variant="ghost" onClick={() => setShowFeedbackModal(true)}>
+              <MessageSquare className="h-4 w-4" />
+              Feedback
+            </Button>
+          </nav>
+
+          <div className="flex items-center gap-3">
+            {user ? (
+              <span className="hidden text-sm text-muted-foreground sm:inline">
+                Welcome, {user.user_metadata?.name || user.email}
+              </span>
+            ) : (
+              <Button variant="default" onClick={() => setShowAuthModal(true)}>
+                <User className="h-4 w-4" />
+                Sign In
+              </Button>
+            )}
+
+            {user && (
+              <Button variant="ghost" onClick={handleSignOut}>
+                <LogOut className="h-4 w-4" />
+                Sign Out
+              </Button>
+            )}
+
+            <DropdownMenu open={isAccountMenuOpen} onOpenChange={setIsAccountMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className="md:hidden">
+                  <Menu className="h-4 w-4" />
+                  <span className="sr-only">Open menu</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setIsAccountMenuOpen(false);
+                    setGuideFocus(null);
+                    setActiveTab('analyzer');
+                    setTimeout(() => focusMainContent(), 150);
+                  }}
                   className="flex items-center gap-2"
                 >
-                  <User className="h-4 w-4" />
-                  Sign In
-                </Button>
-              )}
-
-              {user && (
-                <span className="hidden text-sm text-muted-foreground sm:inline">
-                  Welcome, {user.user_metadata?.name || user.email}
-                </span>
-              )}
-
-              <DropdownMenu open={isAccountMenuOpen} onOpenChange={setIsAccountMenuOpen}>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" className="rounded-full">
-                    <Menu className="h-4 w-4" />
-                    <span className="sr-only">Open menu</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      setIsAccountMenuOpen(false);
-                      setGuideFocus(null);
-                      setActiveTab('analyzer');
-                      setTimeout(() => focusMainContent(), 150);
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <Search className="h-4 w-4" />
-                    Analyze Food
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      setIsAccountMenuOpen(false);
-                      setGuideFocus(null);
-                      setActiveTab('guide');
-                      setTimeout(() => focusMainContent(), 150);
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <BookOpen className="h-4 w-4" />
-                    Clean Eating Guide
-                  </DropdownMenuItem>
-
-                  {user ? (
-                    <>
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          setActiveTab('history');
-                          setIsAccountMenuOpen(false);
-                          setTimeout(() => focusMainContent(), 150);
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <History className="h-4 w-4" />
-                        History
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          setActiveTab('preferences');
-                          setIsAccountMenuOpen(false);
-                          setTimeout(() => focusMainContent(), 150);
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <Settings className="h-4 w-4" />
-                        Preferences
-                      </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      setIsAccountMenuOpen(false);
-                      setTimeout(() => setShowFeedbackModal(true), 100);
-                    }}
-                        className="flex items-center gap-2"
-                      >
-                        <MessageSquare className="h-4 w-4" />
-                        Provide Feedback
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          setIsAccountMenuOpen(false);
-                          setTimeout(() => handleSignOut(), 0);
-                        }}
-                        className="flex items-center gap-2 text-red-600"
-                      >
-                        <LogOut className="h-4 w-4" />
-                        Sign Out
-                      </DropdownMenuItem>
-                    </>
-                  ) : (
+                  <Search className="h-4 w-4" />
+                  Analyze Food
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setIsAccountMenuOpen(false);
+                    setGuideFocus(null);
+                    setActiveTab('guide');
+                    setTimeout(() => focusMainContent(), 150);
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <BookOpen className="h-4 w-4" />
+                  Clean Eating Guide
+                </DropdownMenuItem>
+                {user && (
+                  <>
                     <DropdownMenuItem
                       onSelect={() => {
+                        setActiveTab('history');
                         setIsAccountMenuOpen(false);
-                        setTimeout(() => setShowFeedbackModal(true), 100);
+                        setTimeout(() => focusMainContent(), 150);
                       }}
                       className="flex items-center gap-2"
                     >
-                      <MessageSquare className="h-4 w-4" />
-                      Provide Feedback
+                      <History className="h-4 w-4" />
+                      History
                     </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setActiveTab('preferences');
+                        setIsAccountMenuOpen(false);
+                        setTimeout(() => focusMainContent(), 150);
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Preferences
+                    </DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setIsAccountMenuOpen(false);
+                    setTimeout(() => setShowFeedbackModal(true), 100);
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  Provide Feedback
+                </DropdownMenuItem>
+                {user && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setIsAccountMenuOpen(false);
+                        setTimeout(() => handleSignOut(), 0);
+                      }}
+                      className="flex items-center gap-2 text-red-600"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Sign Out
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
