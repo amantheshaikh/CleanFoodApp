@@ -5,12 +5,13 @@ import { AuthModal } from './components/AuthModal';
 import { AnalysisHistory } from './components/AnalysisHistory';
 import { UserPreferences } from './components/UserPreferences';
 import { FeedbackForm } from './components/FeedbackForm';
+import { ApiDocs } from './components/ApiDocs';
 import { Card, CardContent } from './components/ui/card';
 import { Button } from './components/ui/button';
 import { ImageWithFallback } from './components/figma/ImageWithFallback';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog';
-import { Leaf, BookOpen, Search, User, LogOut, History, Settings, MessageSquare, Menu } from 'lucide-react';
+import { Leaf, BookOpen, Search, User, LogOut, History, Settings, MessageSquare, Menu, FileCode } from 'lucide-react';
 import { supabase } from './utils/supabase/client';
 import type { AvoidSectionId } from './data/avoidList';
 import { Toaster } from './components/ui/sonner';
@@ -120,6 +121,17 @@ export default function App() {
               <BookOpen className="h-4 w-4" />
               Guide
             </Button>
+            <Button
+              variant={activeTab === 'api-docs' ? 'secondary' : 'ghost'}
+              onClick={() => {
+                setGuideFocus(null);
+                setActiveTab('api-docs');
+                focusMainContent();
+              }}
+            >
+              <FileCode className="h-4 w-4" />
+              API Docs
+            </Button>
             {user && (
               <>
                 <Button
@@ -200,6 +212,18 @@ export default function App() {
                 >
                   <BookOpen className="h-4 w-4" />
                   Clean Eating Guide
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setIsAccountMenuOpen(false);
+                    setGuideFocus(null);
+                    setActiveTab('api-docs');
+                    setTimeout(() => focusMainContent(), 150);
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <FileCode className="h-4 w-4" />
+                  API Docs
                 </DropdownMenuItem>
                 {user && (
                   <>
@@ -317,6 +341,7 @@ export default function App() {
         {user && activeTab === 'preferences' && (
           <UserPreferences accessToken={accessToken} />
         )}
+        {activeTab === 'api-docs' && <ApiDocs />}
       </main>
 
       {/* Footer */}

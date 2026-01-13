@@ -1,0 +1,701 @@
+openapi: 3.0.3
+info:
+  title: Clean Eats API
+  version: "1.0.0"
+  description: |
+    Clean Eats provides personalized food intelligence:
+    - Barcode lookup via Open Food Facts (OFF)
+    - OCR of ingredients images
+    - Ingredient normalization + evaluation (clean / not clean / clean-but-not-for-you)
+    - User preferences (allergens, avoid ingredients, dietary restrictions)
+    - Product submission when barcode not found (for contribution workflows)
+
+servers:
+  - url: https://api.cleaneats.example.com
+    description: Production
+  - url: https://sandbox-api.cleaneats.example.com
+    description: Sandbox
+
+tags:
+  - name: Meta
+  - name: Products
+  - name: Analysis
+  - name: OCR
+  - name: Users
+  - name: Submissions
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Meta]
+      summary: Health check
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  version:
+                    type: string
+                    example: "1.0.0"
+
+  /v1/capabilities:
+    get:
+      tags: [Meta]
+      summary: Capabilities and feature flags
+      operationId: getCapabilities
+      security: []
+      responses:
+        "200":
+          description: Runtime capabilities for this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Capabilities"
+
+  /v1/products/{barcode}:
+    get:
+      tags: [Products]
+      summary: Get product analysis by barcode
+      description: |
+        Looks up a product by barcode (primarily via Open Food Facts) and returns:
+        - product details (if found)
+        - normalized ingredients
+        - evaluation (clean, not clean, clean-but-not-for-you)
+      operationId: getProductByBarcode
+      parameters:
+        - name: barcode
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "8901234567890"
+        - name: user_id
+          in: query
+          required: false
+          description: Optional user id to personalize evaluation with saved preferences.
+          schema:
+            type: string
+          example: "usr_123"
+      responses:
+        "200":
+          description: Product found and analyzed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductLookupResponse"
+        "404":
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                notFound:
+                  value:
+                    error:
+                      code: PRODUCT_NOT_FOUND
+                      message: "No product found for this barcode."
+                      details:
+                        barcode: "8901234567890"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/products/lookup:
+    post:
+      tags: [Products]
+      summary: Lookup product by barcode (POST)
+      operationId: postProductLookup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [barcode]
+              properties:
+                barcode:
+                  type: string
+                user_id:
+                  type: string
+                  description: Optional user id to personalize evaluation with saved preferences.
+            examples:
+              sample:
+                value:
+                  barcode: "8901234567890"
+                  user_id: "usr_123"
+      responses:
+        "200":
+          description: Product found and analyzed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductLookupResponse"
+        "404":
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/analyze:
+    post:
+      tags: [Analysis]
+      summary: Analyze ingredients text (normalize + evaluate)
+      description: |
+        Normalizes the ingredients text using taxonomy rules and evaluates:
+        - "clean" vs "not_clean" using configured harmful ingredients
+        - personalization using provided or saved preferences
+      operationId: analyzeIngredients
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeRequest"
+            examples:
+              textOnly:
+                value:
+                  ingredients_text: "Water, shugar, palm oil, salt"
+                  preferences:
+                    allergens: ["milk", "peanut"]
+                    avoid_ingredients: ["palm oil"]
+                    diets: ["vegan"]
+      responses:
+        "200":
+          description: Analysis result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyzeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/ocr:
+    post:
+      tags: [OCR]
+      summary: OCR ingredients image
+      description: |
+        Extracts text from an image containing ingredients.
+        You can then call /v1/analyze with the returned text.
+      operationId: ocrImage
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+                language:
+                  type: string
+                  description: OCR language hint (e.g., "eng")
+                  default: eng
+          application/json:
+            schema:
+              type: object
+              required: [image_base64]
+              properties:
+                image_base64:
+                  type: string
+                  description: Base64-encoded image bytes (no data URL prefix).
+                language:
+                  type: string
+                  default: eng
+      responses:
+        "200":
+          description: OCR output
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OcrResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "501":
+          description: OCR not configured on server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/users/{userId}/preferences:
+    get:
+      tags: [Users]
+      summary: Get user preferences
+      operationId: getUserPreferences
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "usr_123"
+      responses:
+        "200":
+          description: Preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPreferences"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    put:
+      tags: [Users]
+      summary: Set/replace user preferences
+      operationId: putUserPreferences
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "usr_123"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserPreferences"
+      responses:
+        "200":
+          description: Updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPreferences"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/products/submit:
+    post:
+      tags: [Submissions]
+      summary: Submit product when barcode lookup fails
+      description: |
+        Used when a product barcode is not found. Accepts product details and ingredients.
+        Backend may queue a contribution to Open Food Facts and/or store internally.
+      operationId: submitProduct
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/ProductSubmissionRequestMultipart"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductSubmissionRequest"
+      responses:
+        "202":
+          description: Submission accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductSubmissionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Duplicate submission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  responses:
+    BadRequest:
+      description: Bad request / validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            bad:
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: "Invalid request."
+                  details:
+                    field: "ingredients_text"
+                    reason: "required"
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            unauth:
+              value:
+                error:
+                  code: UNAUTHORIZED
+                  message: "Missing or invalid API key."
+
+  schemas:
+    Capabilities:
+      type: object
+      properties:
+        ocr:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+              example: true
+            languages:
+              type: array
+              items:
+                type: string
+              example: ["eng"]
+        taxonomy:
+          type: object
+          properties:
+            loaded:
+              type: boolean
+              example: true
+            source:
+              type: string
+              description: Path or identifier of the taxonomy source.
+              example: "ingredients.txt"
+            version:
+              type: string
+              nullable: true
+              example: null
+        off:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+              example: true
+            base_url:
+              type: string
+              example: "https://world.openfoodfacts.org"
+
+    AnalyzeRequest:
+      type: object
+      required: [ingredients_text]
+      properties:
+        ingredients_text:
+          type: string
+          description: Raw ingredients text as printed on the label.
+          example: "Water, shugar, palm oil, salt"
+        preferences:
+          $ref: "#/components/schemas/UserPreferences"
+        user_id:
+          type: string
+          description: Optional user id (server may merge saved preferences).
+          example: "usr_123"
+        locale:
+          type: string
+          description: Optional locale hint for normalization (e.g., "en-IN").
+          example: "en-IN"
+
+    AnalyzeResponse:
+      type: object
+      required: [verdict, evaluation, normalized_ingredients]
+      properties:
+        verdict:
+          $ref: "#/components/schemas/Verdict"
+        evaluation:
+          $ref: "#/components/schemas/Evaluation"
+        normalized_ingredients:
+          type: array
+          items:
+            $ref: "#/components/schemas/NormalizedIngredient"
+        notes:
+          type: array
+          items:
+            type: string
+          example:
+            - "OCR text was normalized using ingredient taxonomy."
+        raw:
+          type: object
+          description: Optional raw debug fields (disable in production if desired).
+          additionalProperties: true
+          nullable: true
+
+    OcrResponse:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: Extracted text from the image.
+          example: "Ingredients: Water, shugar, palm oil, salt"
+        language:
+          type: string
+          example: "eng"
+        confidence:
+          type: number
+          format: float
+          nullable: true
+          example: 0.82
+
+    ProductLookupResponse:
+      type: object
+      required: [barcode, lookup, verdict, evaluation, normalized_ingredients]
+      properties:
+        barcode:
+          type: string
+          example: "8901234567890"
+        product:
+          $ref: "#/components/schemas/Product"
+        lookup:
+          type: object
+          properties:
+            source:
+              type: string
+              description: Where the product came from (e.g., off_http, off_sdk, internal_cache).
+              example: "off_http"
+            off_status:
+              type: integer
+              nullable: true
+              example: 1
+        verdict:
+          $ref: "#/components/schemas/Verdict"
+        evaluation:
+          $ref: "#/components/schemas/Evaluation"
+        normalized_ingredients:
+          type: array
+          items:
+            $ref: "#/components/schemas/NormalizedIngredient"
+
+    Product:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Sample Snack"
+        brand:
+          type: string
+          nullable: true
+          example: "SampleBrand"
+        image_url:
+          type: string
+          nullable: true
+          example: "https://images.openfoodfacts.org/images/products/..."
+        ingredients_text:
+          type: string
+          nullable: true
+          example: "Water, sugar, palm oil, salt"
+
+    NormalizedIngredient:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Canonical, normalized ingredient name (single normalization output).
+          example: "sugar"
+        taxonomy_id:
+          type: string
+          nullable: true
+          description: Optional taxonomy id if matched (e.g., "en:sugar").
+          example: "en:sugar"
+        matched_from:
+          type: string
+          nullable: true
+          description: The raw token that produced this normalization.
+          example: "shugar"
+
+    Verdict:
+      type: string
+      enum: [clean, not_clean, clean_but_not_for_you, unknown]
+      example: clean_but_not_for_you
+
+    Evaluation:
+      type: object
+      required: [harmful_hits, allergen_hits, avoid_hits, diet_flags]
+      properties:
+        harmful_hits:
+          type: array
+          description: Harmful/non-clean ingredients detected (based on your ruleset).
+          items:
+            type: string
+          example: ["palm oil"]
+        allergen_hits:
+          type: array
+          description: Allergen ingredients detected per user preferences.
+          items:
+            type: string
+          example: ["milk"]
+        avoid_hits:
+          type: array
+          description: Ingredients the user wants to avoid.
+          items:
+            type: string
+          example: ["palm oil"]
+        diet_flags:
+          type: array
+          description: Diet conflicts inferred from ingredients (if supported).
+          items:
+            type: string
+          example: ["vegan_conflict: milk"]
+        explanation:
+          type: string
+          nullable: true
+          example: "Contains palm oil (flagged). Also contains milk (allergen)."
+
+    UserPreferences:
+      type: object
+      properties:
+        allergens:
+          type: array
+          items:
+            type: string
+          description: Allergens the user wants to avoid.
+          example: ["milk", "peanut", "soy"]
+        avoid_ingredients:
+          type: array
+          items:
+            type: string
+          description: Specific ingredients the user wants to avoid.
+          example: ["palm oil", "maltodextrin"]
+        diets:
+          type: array
+          items:
+            type: string
+          description: Dietary restrictions/preferences.
+          example: ["vegan", "jain", "gluten_free"]
+        notes:
+          type: string
+          nullable: true
+          example: "Avoid added sugar where possible."
+
+    ProductSubmissionRequest:
+      type: object
+      required: [barcode, product_name, ingredients_text, consent]
+      properties:
+        barcode:
+          type: string
+          example: "8901234567890"
+        product_name:
+          type: string
+          example: "Sample Snack"
+        brand:
+          type: string
+          nullable: true
+          example: "SampleBrand"
+        category:
+          type: string
+          nullable: true
+          example: "Snacks"
+        ingredients_text:
+          type: string
+          example: "Water, sugar, palm oil, salt"
+        country:
+          type: string
+          nullable: true
+          example: "IN"
+        language:
+          type: string
+          nullable: true
+          example: "en"
+        images:
+          type: array
+          nullable: true
+          description: Optional image URLs if already hosted.
+          items:
+            type: string
+        consent:
+          type: object
+          required: [can_share_publicly]
+          properties:
+            can_share_publicly:
+              type: boolean
+              description: User consent to share submission publicly (e.g., contribute to OFF).
+              example: true
+            source:
+              type: string
+              nullable: true
+              description: Attribution/source label (e.g., "user_submission").
+              example: "user_submission"
+
+    ProductSubmissionRequestMultipart:
+      type: object
+      required: [barcode, product_name, ingredients_text, can_share_publicly]
+      properties:
+        barcode:
+          type: string
+        product_name:
+          type: string
+        brand:
+          type: string
+        category:
+          type: string
+        ingredients_text:
+          type: string
+        country:
+          type: string
+        language:
+          type: string
+        can_share_publicly:
+          type: boolean
+        image_front:
+          type: string
+          format: binary
+        image_ingredients:
+          type: string
+          format: binary
+
+    ProductSubmissionResponse:
+      type: object
+      required: [submission_id, status]
+      properties:
+        submission_id:
+          type: string
+          example: "subm_abc123"
+        status:
+          type: string
+          enum: [queued, submitted_to_off, stored_internal, rejected]
+          example: queued
+        message:
+          type: string
+          nullable: true
+          example: "Submission queued for review and contribution."
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              example: "Invalid request."
+            details:
+              type: object
+              additionalProperties: true
+              nullable: true
