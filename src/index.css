@@ -2613,3 +2613,17 @@ html {
     height: 0;
   }
 }
+
+@layer base {
+  a,
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  a[aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
